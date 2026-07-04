@@ -14,6 +14,29 @@
   let saving = $state(false);
   let titleEl = $state<HTMLInputElement | null>(null);
 
+  // Object-URL previews for staged image files (client-side blobs; work anywhere,
+  // including a VS Code webview). Cached per File so we create each URL once.
+  const urlCache = new Map<File, string>();
+  function previewUrl(f: File): string | null {
+    if (!f.type.startsWith('image/')) return null;
+    let u = urlCache.get(f);
+    if (!u) {
+      u = URL.createObjectURL(f);
+      urlCache.set(f, u);
+    }
+    return u;
+  }
+  // Revoke URLs for files that are no longer staged (remove / reset / submit).
+  $effect(() => {
+    const current = new Set(staged);
+    for (const [file, url] of urlCache) {
+      if (!current.has(file)) {
+        URL.revokeObjectURL(url);
+        urlCache.delete(file);
+      }
+    }
+  });
+
   // Reset + focus each time the modal opens.
   $effect(() => {
     if (ui.modalOpen) {
@@ -64,6 +87,11 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
   }
 
+  function addFiles(list: FileList | File[]) {
+    const arr = Array.from(list).filter((f) => f && f.size >= 0);
+    if (arr.length) staged = [...staged, ...arr];
+  }
+
   function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -78,7 +106,13 @@
   function onDrop(e: DragEvent) {
     e.preventDefault();
     const fs = e.dataTransfer?.files;
-    if (fs) staged = [...staged, ...Array.from(fs)];
+    if (fs) addFiles(fs);
+  }
+
+  function onPick(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    if (input.files) addFiles(input.files);
+    input.value = '';
   }
 </script>
 
@@ -104,15 +138,22 @@
       {#if staged.length}
         <div class="staged">
           {#each staged as f, i}
-            <div class="thumb">
-              <span>{f.name}</span>
-              <button onclick={() => (staged = staged.filter((_, j) => j !== i))} aria-label="Remove">×</button>
+            <div class="thumb" class:image={previewUrl(f)}>
+              {#if previewUrl(f)}
+                <img class="preview" src={previewUrl(f)} alt={f.name} />
+              {/if}
+              <span class="name">{f.name}</span>
+              <button class="rm" onclick={() => (staged = staged.filter((_, j) => j !== i))} aria-label="Remove">×</button>
             </div>
           {/each}
         </div>
       {/if}
       <div class="foot">
-        <span class="tip">Paste (⌘V) or drop a screenshot to attach</span>
+        <label class="attach">
+          <input type="file" accept="image/*,video/*" multiple onchange={onPick} hidden />
+          Attach files
+        </label>
+        <span class="tip">or paste (⌘V) / drop a screenshot</span>
         <button class="create" disabled={!title.trim() || saving} onclick={submit}>{saving ? 'Creating…' : 'Create'}</button>
       </div>
     </div>
@@ -134,10 +175,15 @@
   .seg button { padding: 4px 8px; font-size: 11px; background: var(--color-surface-2); border: none; text-transform: capitalize; }
   .seg button.active { background: var(--color-accent-soft); color: var(--color-accent); }
   .labels { flex: 1; padding: 4px 10px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; outline: none; font-size: 12px; }
-  .staged { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .staged { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
   .thumb { display: flex; align-items: center; gap: 6px; font-size: 11px; background: var(--color-surface-2); padding: 3px 8px; border-radius: 6px; }
-  .thumb button { background: none; border: none; color: var(--color-dim); }
-  .foot { display: flex; align-items: center; margin-top: 14px; }
+  .thumb.image { position: relative; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; }
+  .preview { width: 84px; height: 84px; object-fit: cover; border-radius: 4px; display: block; background: var(--color-bg); }
+  .thumb .name { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thumb .rm { background: none; border: none; color: var(--color-dim); cursor: pointer; }
+  .thumb.image .rm { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; line-height: 1; border-radius: 4px; background: rgb(0 0 0 / 0.55); color: #fff; }
+  .foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .attach { font-size: 11px; padding: 4px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-2); cursor: pointer; }
   .tip { color: var(--color-dim); font-size: 11px; }
   .create { margin-left: auto; padding: 6px 16px; border-radius: 6px; border: none; background: var(--color-accent); color: #062018; font-weight: 600; }
   .create:disabled { opacity: 0.5; }
