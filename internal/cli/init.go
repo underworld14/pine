@@ -84,7 +84,8 @@ func runInit(w io.Writer) error {
 	} else if ignored, rule := pineIgnored(root); ignored {
 		fmt.Fprintf(w, "warning: .pine appears to be gitignored (%q); Pine data is meant to be committed\n", rule)
 	}
-	fmt.Fprintln(w, "\nNext: 'pine create --type bug --title \"...\"' or 'pine open'")
+	fmt.Fprintln(w, "\nTickets are committed with your code, so they're branch-scoped — see \"Pine & git branches\" in the README.")
+	fmt.Fprintln(w, "Next: 'pine create --type bug --title \"...\"' or 'pine open'")
 	return nil
 }
 

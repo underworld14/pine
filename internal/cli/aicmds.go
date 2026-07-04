@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -50,7 +49,7 @@ func newPromptCmd() *cobra.Command {
 			if data, err := os.ReadFile(filepath.Join(s.Root(), "prompts", "fix.md")); err == nil {
 				tmpl = string(data)
 			}
-			md, err := contextgen.Prompt(s, gitStatus(s), strings.ToUpper(args[0]), tmpl)
+			md, err := contextgen.Prompt(s, gitStatus(s), normalizeID(args[0]), tmpl)
 			if err != nil {
 				return err
 			}

@@ -18,7 +18,9 @@ func scaffold(t *testing.T) *store.Store {
 	if err := os.MkdirAll(filepath.Join(pine, "tickets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfgB, _ := config.Default("my-app").Bytes()
+	cfg := config.Default("my-app")
+	cfg.IDStyle = "sequential"
+	cfgB, _ := cfg.Bytes()
 	os.WriteFile(filepath.Join(pine, "config.json"), cfgB, 0o644)
 	bB, _ := config.DefaultBoard().Bytes()
 	os.WriteFile(filepath.Join(pine, "board.json"), bB, 0o644)

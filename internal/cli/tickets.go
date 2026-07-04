@@ -92,7 +92,7 @@ func newShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := strings.ToUpper(args[0])
+			id := normalizeID(args[0])
 			t, err := s.Get(id)
 			if err != nil {
 				return err
@@ -135,8 +135,8 @@ func newCreateCmd() *cobra.Command {
 				Title:    title,
 				Priority: priority,
 				Labels:   labels,
-				Deps:     upperAll(deps),
-				Parent:   strings.ToUpper(parent),
+				Deps:     normalizeIDs(deps),
+				Parent:   normalizeID(parent),
 				Status:   status,
 				Body:     body,
 			})
@@ -181,7 +181,7 @@ func newUpdateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := strings.ToUpper(args[0])
+			id := normalizeID(args[0])
 			flags := cmd.Flags()
 			t, err := s.Update(id, func(u *ticket.Ticket) error {
 				if flags.Changed("status") {
@@ -197,7 +197,7 @@ func newUpdateCmd() *cobra.Command {
 					if strings.EqualFold(parent, "none") || parent == "" {
 						u.Parent = ""
 					} else {
-						u.Parent = strings.ToUpper(parent)
+						u.Parent = normalizeID(parent)
 					}
 				}
 				u.Labels = applyLabelEdits(u.Labels, addLabels, rmLabels)
@@ -233,7 +233,7 @@ func newCloseCmd() *cobra.Command {
 				return err
 			}
 			for _, arg := range args {
-				id := strings.ToUpper(arg)
+				id := normalizeID(arg)
 				if _, err := s.Update(id, func(u *ticket.Ticket) error {
 					u.Status = ticket.StatusDone
 					return nil
@@ -387,10 +387,21 @@ func writeJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-func upperAll(ss []string) []string {
-	out := make([]string, len(ss))
-	for i, s := range ss {
-		out[i] = strings.ToUpper(s)
+// normalizeID uppercases the prefix of a ticket id while preserving the suffix.
+// Hash suffixes are lowercase (BUG-7f3k2a), so uppercasing the whole id would
+// break the match; only the type prefix is normalized (so "bug-1" → "BUG-1").
+func normalizeID(id string) string {
+	i := strings.IndexByte(id, '-')
+	if i < 0 {
+		return strings.ToUpper(id)
+	}
+	return strings.ToUpper(id[:i]) + id[i:]
+}
+
+func normalizeIDs(ids []string) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = normalizeID(id)
 	}
 	return out
 }

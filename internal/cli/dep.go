@@ -29,12 +29,12 @@ func newDepAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := strings.ToUpper(args[0])
+			id := normalizeID(args[0])
 			cur, err := s.Get(id)
 			if err != nil {
 				return err
 			}
-			merged := mergeDeps(cur.Deps, upperAll(args[1:]))
+			merged := mergeDeps(cur.Deps, normalizeIDs(args[1:]))
 			if cyc := wouldCycle(s, id, merged); cyc != nil {
 				return fmt.Errorf("that dependency would create a cycle among: %s", strings.Join(cyc, ", "))
 			}
@@ -60,12 +60,12 @@ func newDepRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := strings.ToUpper(args[0])
+			id := normalizeID(args[0])
 			cur, err := s.Get(id)
 			if err != nil {
 				return err
 			}
-			remaining := removeDeps(cur.Deps, upperAll(args[1:]))
+			remaining := removeDeps(cur.Deps, normalizeIDs(args[1:]))
 			if _, err := s.Update(id, func(u *ticket.Ticket) error {
 				u.Deps = remaining
 				return nil
@@ -92,7 +92,7 @@ func newDepTreeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := strings.ToUpper(args[0])
+			id := normalizeID(args[0])
 			if _, err := s.Get(id); err != nil {
 				return err
 			}

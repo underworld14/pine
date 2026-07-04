@@ -49,7 +49,7 @@ func (r *Report) HasErrors() bool {
 	return false
 }
 
-var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+\.md$`)
+var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[a-z0-9]+\.md$`)
 
 // Run performs all checks against the store.
 func Run(s *store.Store) *Report {

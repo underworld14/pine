@@ -29,6 +29,13 @@ func initRepo(t *testing.T) string {
 	if _, err := run(t, dir, "init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	// Pin sequential IDs so these tests can assert on BUG-001, FEAT-001, etc.
+	// (hash IDs are covered by the store tests).
+	cfgPath := filepath.Join(dir, ".pine", "config.json")
+	if raw, err := os.ReadFile(cfgPath); err == nil {
+		patched := strings.ReplaceAll(string(raw), `"idStyle":"hash"`, `"idStyle":"sequential"`)
+		os.WriteFile(cfgPath, []byte(patched), 0o644)
+	}
 	return dir
 }
 
@@ -144,6 +151,52 @@ func TestEpicProgress(t *testing.T) {
 	json.Unmarshal([]byte(out), &v)
 	if v.EpicProgress == nil || v.EpicProgress.Done != 1 || v.EpicProgress.Total != 2 {
 		t.Fatalf("epic progress = %+v", v.EpicProgress)
+	}
+}
+
+// createdID extracts the id from a "Created BUG-…: title" create message.
+func createdID(out string) string {
+	line := strings.TrimPrefix(strings.TrimSpace(out), "Created ")
+	if i := strings.IndexByte(line, ':'); i >= 0 {
+		return line[:i]
+	}
+	return ""
+}
+
+// TestHashIDsThroughCLI exercises the default hash id style end-to-end: every
+// command must accept the exact (lowercase-suffix) id — regression guard for the
+// bug where the CLI uppercased whole ids and broke hash lookups/deps.
+func TestHashIDsThroughCLI(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := run(t, dir, "init"); err != nil { // hash by default
+		t.Fatal(err)
+	}
+	out, _ := run(t, dir, "create", "--type", "bug", "--title", "hashed")
+	id := createdID(out)
+	if !strings.HasPrefix(id, "BUG-") || len(id) <= len("BUG-") {
+		t.Fatalf("expected a hash id, got %q", id)
+	}
+
+	if _, err := run(t, dir, "update", id, "--status", "doing"); err != nil {
+		t.Fatalf("update %s: %v", id, err)
+	}
+	out2, _ := run(t, dir, "show", id, "--json")
+	var v view.Ticket
+	json.Unmarshal([]byte(out2), &v)
+	if v.Status != "doing" {
+		t.Errorf("status = %s (hash id round-trip failed)", v.Status)
+	}
+
+	// A dependency referencing a hash id must resolve, not go dangling.
+	depOut, _ := run(t, dir, "create", "--type", "feature", "--title", "dep")
+	depID := createdID(depOut)
+	if _, err := run(t, dir, "dep", "add", id, depID); err != nil {
+		t.Fatalf("dep add: %v", err)
+	}
+	blk, _ := run(t, dir, "show", id, "--json")
+	json.Unmarshal([]byte(blk), &v)
+	if !v.Blocked || len(v.Dangling) != 0 {
+		t.Errorf("bug should be blocked by an existing dep, got blocked=%v dangling=%v", v.Blocked, v.Dangling)
 	}
 }
 
