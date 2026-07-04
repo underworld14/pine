@@ -1,0 +1,19 @@
+# Go
+/pine
+/dist/
+*.test
+*.out
+
+# Frontend build output (embedded at build time)
+/web/build/
+/web/.svelte-kit/
+/web/node_modules/
+node_modules/
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+
+# Test scratch
+/tmp-*

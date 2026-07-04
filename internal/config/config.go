@@ -1,0 +1,229 @@
+// Package config loads, validates, and saves Pine's two JSON config files:
+// .pine/config.json (project settings) and .pine/board.json (kanban columns).
+// Both preserve unknown top-level keys across a round-trip so that fields added
+// by future versions or by hand are never dropped.
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// ConfigVersion is the current schema version written by pine init.
+const ConfigVersion = 1
+
+// Config mirrors .pine/config.json.
+type Config struct {
+	Version     int          `json:"version"`
+	Project     Project      `json:"project"`
+	Types       []TicketType `json:"types"`
+	Priorities  []string     `json:"priorities"`
+	Attachments Attachments  `json:"attachments"`
+	Git         Git          `json:"git"`
+
+	// Extra holds unknown top-level keys, preserved verbatim on save.
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+type Project struct {
+	Name string `json:"name"`
+}
+
+// TicketType maps an ID prefix (BUG) to a display name (Bug).
+type TicketType struct {
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+}
+
+// Attachments controls the image optimizer.
+type Attachments struct {
+	Optimize     bool `json:"optimize"`
+	MaxDimension int  `json:"maxDimension"`
+	Quality      int  `json:"quality"`
+	MaxVideoMB   int  `json:"maxVideoMB"`
+}
+
+// Git selects the git backend: "auto" (CLI when available, else go-git),
+// "gogit", or "cli".
+type Git struct {
+	Backend string `json:"backend"`
+}
+
+var prefixRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*$`)
+
+// Default returns the configuration pine init writes for a fresh project.
+func Default(projectName string) *Config {
+	return &Config{
+		Version: ConfigVersion,
+		Project: Project{Name: projectName},
+		Types: []TicketType{
+			{Prefix: "BUG", Name: "Bug"},
+			{Prefix: "FEAT", Name: "Feature"},
+			{Prefix: "EPIC", Name: "Epic"},
+		},
+		Priorities:  []string{"low", "medium", "high", "critical"},
+		Attachments: Attachments{Optimize: true, MaxDimension: 2000, Quality: 80, MaxVideoMB: 50},
+		Git:         Git{Backend: "auto"},
+	}
+}
+
+// Load reads and parses config.json from path.
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
+}
+
+// Parse decodes config JSON, filling absent keys from defaults and retaining
+// unknown keys. The project name default is empty; callers set it as needed.
+func Parse(data []byte) (*Config, error) {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return nil, fmt.Errorf("config.json is not valid JSON: %w", err)
+	}
+	c := Default("")
+	for key, raw := range all {
+		switch key {
+		case "version":
+			_ = json.Unmarshal(raw, &c.Version)
+		case "project":
+			_ = json.Unmarshal(raw, &c.Project)
+		case "types":
+			_ = json.Unmarshal(raw, &c.Types)
+		case "priorities":
+			_ = json.Unmarshal(raw, &c.Priorities)
+		case "attachments":
+			_ = json.Unmarshal(raw, &c.Attachments)
+		case "git":
+			_ = json.Unmarshal(raw, &c.Git)
+		default:
+			if c.Extra == nil {
+				c.Extra = map[string]json.RawMessage{}
+			}
+			c.Extra[key] = raw
+		}
+	}
+	return c, nil
+}
+
+// MarshalJSON emits config in canonical key order with unknown keys appended,
+// pretty-printed with a trailing newline for clean diffs.
+func (c *Config) MarshalJSON() ([]byte, error) {
+	return orderedJSON([]kv{
+		{"version", c.Version},
+		{"project", c.Project},
+		{"types", c.Types},
+		{"priorities", c.Priorities},
+		{"attachments", c.Attachments},
+		{"git", c.Git},
+	}, c.Extra)
+}
+
+// Bytes returns the serialized config for atomic writing.
+func (c *Config) Bytes() ([]byte, error) { return json.Marshal(c) }
+
+// Validate checks structural invariants. It returns a slice of problems (empty
+// when valid) so doctor can report them all at once.
+func (c *Config) Validate() []string {
+	var problems []string
+	if c.Version <= 0 {
+		problems = append(problems, "config.version must be >= 1")
+	}
+	if len(c.Types) == 0 {
+		problems = append(problems, "config.types must not be empty")
+	}
+	for _, t := range c.Types {
+		if !prefixRe.MatchString(t.Prefix) {
+			problems = append(problems, fmt.Sprintf("config type prefix %q must be uppercase letters/digits", t.Prefix))
+		}
+	}
+	if len(c.Priorities) == 0 {
+		problems = append(problems, "config.priorities must not be empty")
+	}
+	switch c.Git.Backend {
+	case "auto", "gogit", "cli":
+	default:
+		problems = append(problems, fmt.Sprintf("config.git.backend %q must be auto|gogit|cli", c.Git.Backend))
+	}
+	if c.Attachments.Quality < 1 || c.Attachments.Quality > 100 {
+		problems = append(problems, "config.attachments.quality must be 1..100")
+	}
+	if c.Attachments.MaxDimension <= 0 {
+		problems = append(problems, "config.attachments.maxDimension must be > 0")
+	}
+	return problems
+}
+
+// TypeByPrefix returns the ticket type for an ID prefix, if configured.
+func (c *Config) TypeByPrefix(prefix string) (TicketType, bool) {
+	for _, t := range c.Types {
+		if t.Prefix == strings.ToUpper(prefix) {
+			return t, true
+		}
+	}
+	return TicketType{}, false
+}
+
+// HasPriority reports whether p is a configured priority.
+func (c *Config) HasPriority(p string) bool {
+	p = strings.ToLower(p)
+	for _, v := range c.Priorities {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
+// --- shared ordered-JSON helper ---
+
+type kv struct {
+	key string
+	val any
+}
+
+func orderedJSON(pairs []kv, extra map[string]json.RawMessage) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	first := true
+	write := func(key string, raw []byte) {
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+		kb, _ := json.Marshal(key)
+		buf.Write(kb)
+		buf.WriteByte(':')
+		buf.Write(raw)
+	}
+	for _, p := range pairs {
+		raw, err := json.Marshal(p.val)
+		if err != nil {
+			return nil, err
+		}
+		write(p.key, raw)
+	}
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		write(k, extra[k])
+	}
+	buf.WriteByte('}')
+
+	var out bytes.Buffer
+	if err := json.Indent(&out, buf.Bytes(), "", "  "); err != nil {
+		return nil, err
+	}
+	out.WriteByte('\n')
+	return out.Bytes(), nil
+}
