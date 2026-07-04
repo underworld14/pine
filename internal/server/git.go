@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/izzadev/pine/internal/gitx"
+	"github.com/underworld14/pine/internal/gitx"
 )
 
 const (

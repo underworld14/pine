@@ -3,8 +3,8 @@ package server
 import (
 	"log"
 
-	"github.com/izzadev/pine/internal/view"
-	"github.com/izzadev/pine/internal/watch"
+	"github.com/underworld14/pine/internal/view"
+	"github.com/underworld14/pine/internal/watch"
 )
 
 // StartLiveSync begins watching the .pine directory and broadcasting external

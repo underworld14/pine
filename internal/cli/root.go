@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/izzadev/pine/internal/store"
 	"github.com/spf13/cobra"
+	"github.com/underworld14/pine/internal/store"
 )
 
 // version is set by Execute from the main package's build-time value.
@@ -52,6 +52,9 @@ func newRootCmd() *cobra.Command {
 		newCloseCmd(),
 		newDepCmd(),
 		newReadyCmd(),
+		newContextCmd(),
+		newPromptCmd(),
+		newExportCmd(),
 	)
 	return root
 }

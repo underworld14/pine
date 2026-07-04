@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/izzadev/pine/internal/search"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/search"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // searchIndex is an alias so server code refers to one type.

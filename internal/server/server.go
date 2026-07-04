@@ -12,10 +12,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/gitx"
-	"github.com/izzadev/pine/internal/store"
-	"github.com/izzadev/pine/internal/view"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/gitx"
+	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/view"
 )
 
 // Server wires the store into HTTP handlers.
@@ -56,6 +56,7 @@ func (srv *Server) Handler() http.Handler {
 			r.Delete("/{id}", srv.handleDeleteTicket)
 			r.Post("/{id}/attachments", srv.handleUploadAttachments)
 			r.Delete("/{id}/attachments/{name}", srv.handleDeleteAttachment)
+			r.Get("/{id}/prompt", srv.handlePrompt)
 		})
 		r.Get("/board", srv.handleBoard)
 		r.Get("/config", srv.handleGetConfig)
@@ -63,6 +64,7 @@ func (srv *Server) Handler() http.Handler {
 		r.Get("/search", srv.handleSearch)
 		r.Get("/git", srv.handleGit)
 		r.Get("/files", srv.handleFiles)
+		r.Get("/context", srv.handleContext)
 		r.Get("/events", srv.handleEvents)
 	})
 

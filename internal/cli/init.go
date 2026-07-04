@@ -8,27 +8,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/izzadev/pine/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/contextgen"
 )
 
-// Default template and prompt files written by pine init.
+// Default template and prompt files written by pine init. The fix prompt reuses
+// the same default the AI commands fall back to, so they never drift.
 const (
 	tmplBug     = "# Description\n\n# Steps to Reproduce\n\n# Expected\n\n# Actual\n\n# Related Files\n\n# Attachments\n"
 	tmplFeature = "# Description\n\n# Acceptance Criteria\n\n# Related Files\n\n# Attachments\n"
 	tmplEpic    = "# Description\n\n# Goals\n\n# Child Tickets\n"
 
-	promptFix = "# Fix Request: {{.ID}} — {{.Title}}\n\n" +
-		"## Issue\n" +
-		"Status: {{.Status}} · Priority: {{.Priority}}{{if .Labels}} · Labels: {{join .Labels \", \"}}{{end}}\n\n" +
-		"{{.Body}}\n\n" +
-		"## Related Files\n{{range .RelatedFiles}}- {{.}}\n{{else}}(none listed)\n{{end}}\n" +
-		"## Acceptance Criteria\n" +
-		"- The behavior described under \"Expected\" occurs when following \"Steps\".\n" +
-		"- No regressions in the related files above.\n\n" +
-		"## When done\n" +
-		"- Edit `.pine/tickets/{{.ID}}.md` and set `status: testing` (then `done` once verified).\n" +
-		"- Summarize your changes in a `# Fix Notes` section in the ticket.\n"
+	promptFix = contextgen.DefaultFixTemplate
 )
 
 func newInitCmd() *cobra.Command {

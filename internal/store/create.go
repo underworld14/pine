@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // Built-in body templates, used when no templates/<type>.md file exists. They

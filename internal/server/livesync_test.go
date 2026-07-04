@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/store"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/store"
 )
 
 // TestLiveSyncExternalEdit is the core M4 contract: an edit made directly to a

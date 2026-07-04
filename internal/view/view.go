@@ -7,8 +7,8 @@ package view
 import (
 	"time"
 
-	"github.com/izzadev/pine/internal/store"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // Ticket is the JSON-facing representation of a ticket.

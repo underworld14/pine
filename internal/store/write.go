@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // saveTicket serializes a ticket, writes it atomically, and refreshes the cache

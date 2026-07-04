@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // AttachmentInfo describes one file in a ticket's attachments directory.

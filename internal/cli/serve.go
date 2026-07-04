@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/izzadev/pine/internal/server"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/underworld14/pine/internal/server"
 )
 
 const defaultPort = 3412

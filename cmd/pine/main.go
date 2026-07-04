@@ -3,7 +3,7 @@
 // AI-context generation, all stored as files in a .pine/ directory.
 package main
 
-import "github.com/izzadev/pine/internal/cli"
+import "github.com/underworld14/pine/internal/cli"
 
 // version is overridden at build time via -ldflags.
 var version = "0.1.0-dev"

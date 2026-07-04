@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/izzadev/pine/internal/config"
+	"github.com/underworld14/pine/internal/config"
 )
 
 // Config controls optimization, derived from config.json's attachments block.

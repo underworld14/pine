@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/izzadev/pine/internal/attach"
-	"github.com/izzadev/pine/internal/store"
-	"github.com/izzadev/pine/internal/view"
+	"github.com/underworld14/pine/internal/attach"
+	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/view"
 )
 
 const maxUploadBytes = 512 << 20 // 512 MB (covers video)

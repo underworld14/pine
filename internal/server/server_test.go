@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/store"
-	"github.com/izzadev/pine/internal/view"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/view"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {

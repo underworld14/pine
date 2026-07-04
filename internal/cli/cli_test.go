@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/izzadev/pine/internal/view"
+	"github.com/underworld14/pine/internal/view"
 )
 
 // run executes the pine command tree against dir and returns combined output.

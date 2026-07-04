@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // Sentinel errors returned by the store.

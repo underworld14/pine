@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 func must(t *testing.T, err error) {

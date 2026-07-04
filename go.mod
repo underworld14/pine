@@ -1,4 +1,4 @@
-module github.com/izzadev/pine
+module github.com/underworld14/pine
 
 go 1.26.4
 

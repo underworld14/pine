@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/izzadev/pine/web"
+	"github.com/underworld14/pine/web"
 )
 
 // placeholderHTML is shown when the binary was built without an embedded

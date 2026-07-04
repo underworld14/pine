@@ -8,10 +8,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/izzadev/pine/internal/store"
-	"github.com/izzadev/pine/internal/ticket"
-	"github.com/izzadev/pine/internal/view"
 	"github.com/spf13/cobra"
+	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/view"
 )
 
 // --- list ---

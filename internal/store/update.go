@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/izzadev/pine/internal/config"
-	"github.com/izzadev/pine/internal/ticket"
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 // Update applies mut to a copy of the ticket, bumps its updated timestamp, and
