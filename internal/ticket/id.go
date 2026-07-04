@@ -8,10 +8,12 @@ import (
 	"strings"
 )
 
-// idPattern matches a ticket ID: an uppercase prefix, a hyphen, and an
-// alphanumeric suffix — either the old sequential number (BUG-001) or a random
-// base32 hash suffix (BUG-7f3k2a). Both forms are valid and coexist.
-var idPattern = regexp.MustCompile(`^([A-Z][A-Z0-9]*)-([a-z0-9]+)$`)
+// idPattern matches a ticket ID: an uppercase prefix, a hyphen, and a suffix
+// that is either the old sequential number (BUG-001) or a Crockford-base32 hash
+// (BUG-7f3k2a). The suffix class is exactly what Pine generates (digits, or the
+// lowercase base32 alphabet excluding i/l/o/u), so descriptive filenames like
+// TODO-list.md are not mistaken for tickets.
+var idPattern = regexp.MustCompile(`^([A-Z][A-Z0-9]*)-([0-9a-hj-km-np-tv-z]+)$`)
 
 // numericSuffix matches the sequential form's suffix (digits only).
 var numericSuffix = regexp.MustCompile(`^[0-9]+$`)

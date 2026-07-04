@@ -31,7 +31,7 @@ var (
 
 // ticketFileRe matches valid ticket filenames (sequential BUG-001 or hash
 // BUG-7f3k2a); anything else in tickets/ is ignored (editor droppings, etc.).
-var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[a-z0-9]+\.md$`)
+var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9a-hj-km-np-tv-z]+\.md$`)
 
 // Subdirectory and file names inside .pine/.
 const (

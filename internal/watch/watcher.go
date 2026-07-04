@@ -31,7 +31,7 @@ type Event struct {
 	ID   string // ticket id when Kind == KindTicket
 }
 
-var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[a-z0-9]+\.md$`)
+var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9a-hj-km-np-tv-z]+\.md$`)
 
 // debounceWindow coalesces bursts of events (e.g. editor atomic saves).
 const debounceWindow = 150 * time.Millisecond

@@ -92,6 +92,22 @@ func TestSearchWithFilter(t *testing.T) {
 	}
 }
 
+func TestSearchByHashID(t *testing.T) {
+	idx, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx.Upsert(Doc{ID: "BUG-7f3k2a", Title: "Some ticket", Type: "BUG"})
+	idx.ready.Store(true)
+	// Both the exact stored casing and a lowercased prefix must find it.
+	for _, q := range []string{"BUG-7f3k2a", "bug-7f3k2a"} {
+		hits := idx.Search(q, Filter{}, 10)
+		if topID(hits) != "BUG-7f3k2a" {
+			t.Errorf("query %q: top = %q, want BUG-7f3k2a", q, topID(hits))
+		}
+	}
+}
+
 func TestSearchEmptyQuery(t *testing.T) {
 	idx := buildIndex(t)
 	if hits := idx.Search("", Filter{}, 10); hits != nil {

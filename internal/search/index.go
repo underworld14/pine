@@ -134,11 +134,15 @@ func (i *Index) Search(qstr string, f Filter, limit int) []Hit {
 
 // userTextQuery is a disjunction across fields with id/title boosted.
 func userTextQuery(q string) query.Query {
-	idExact := bleve.NewTermQuery(strings.ToUpper(q))
+	// The id field is indexed verbatim (keyword analyzer, no lowercasing), so an
+	// id query must match the stored casing: uppercase prefix + lowercase hash
+	// suffix. Uppercasing the whole query would break hash-id search.
+	idq := normalizeIDCase(q)
+	idExact := bleve.NewTermQuery(idq)
 	idExact.SetField("id")
 	idExact.SetBoost(10)
 
-	idPrefix := bleve.NewPrefixQuery(strings.ToUpper(q))
+	idPrefix := bleve.NewPrefixQuery(idq)
 	idPrefix.SetField("id")
 	idPrefix.SetBoost(8)
 
@@ -164,6 +168,16 @@ func userTextQuery(q string) query.Query {
 	return bleve.NewDisjunctionQuery(
 		idExact, idPrefix, titleMatch, titlePrefix, bodyMatch, labelTerm, filesMatch,
 	)
+}
+
+// normalizeIDCase uppercases only the id prefix (before the first '-'), matching
+// how ids are stored (uppercase prefix + lowercase hash suffix) so that a query
+// like "bug-7f3k2a" matches the indexed "BUG-7f3k2a".
+func normalizeIDCase(s string) string {
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		return strings.ToUpper(s[:i]) + s[i:]
+	}
+	return strings.ToUpper(s)
 }
 
 func termOn(field, value string) query.Query {

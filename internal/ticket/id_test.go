@@ -11,7 +11,8 @@ func TestValidIDBothForms(t *testing.T) {
 			t.Errorf("%q should be valid", id)
 		}
 	}
-	for _, id := range []string{"bug-1", "BUG_1", "BUG-", "BUG-7F3A", "-1", "BUG-a_b"} {
+	for _, id := range []string{"bug-1", "BUG_1", "BUG-", "BUG-7F3A", "-1", "BUG-a_b",
+		"BUG-list", "TODO-notes"} { // descriptive suffixes use excluded letters (i/l/o)
 		if ValidID(id) {
 			t.Errorf("%q should be invalid", id)
 		}
