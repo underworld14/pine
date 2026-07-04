@@ -1,6 +1,53 @@
 package ticket
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestValidIDBothForms(t *testing.T) {
+	for _, id := range []string{"BUG-001", "FEAT-042", "EPIC-1000", "BUG-7f3k2a", "FEAT-9m2xq4"} {
+		if !ValidID(id) {
+			t.Errorf("%q should be valid", id)
+		}
+	}
+	for _, id := range []string{"bug-1", "BUG_1", "BUG-", "BUG-7F3A", "-1", "BUG-a_b"} {
+		if ValidID(id) {
+			t.Errorf("%q should be invalid", id)
+		}
+	}
+}
+
+func TestPrefixOfBothForms(t *testing.T) {
+	if PrefixOf("BUG-001") != "BUG" || PrefixOf("BUG-7f3k2a") != "BUG" || PrefixOf("EPIC-9m2xq4") != "EPIC" {
+		t.Errorf("prefix mismatch")
+	}
+	if PrefixOf("garbage") != "" {
+		t.Errorf("malformed id should yield an empty prefix")
+	}
+}
+
+func TestNewSuffix(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		s := NewSuffix()
+		if len(s) != SuffixLen {
+			t.Fatalf("suffix length = %d, want %d", len(s), SuffixLen)
+		}
+		for _, c := range s {
+			if !strings.ContainsRune(suffixAlphabet, c) {
+				t.Fatalf("suffix char %q not in alphabet", c)
+			}
+		}
+		if !ValidID(MakeID("BUG", s)) {
+			t.Fatalf("MakeID produced an invalid id for suffix %q", s)
+		}
+		seen[s] = true
+	}
+	if len(seen) < 990 {
+		t.Errorf("suffixes not random enough: %d unique of 1000", len(seen))
+	}
+}
 
 func TestIDRoundTrip(t *testing.T) {
 	cases := []struct {

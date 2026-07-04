@@ -99,13 +99,36 @@ func (s *Store) resolvePrefix(typ string) (string, bool) {
 	return "", false
 }
 
-// allocID scans the tickets directory for the highest number with this prefix,
-// then reserves the next free ID with an exclusive create. The reservation is
-// an empty file that saveTicket's atomic rename replaces.
+// allocID reserves a free ID for the prefix with an exclusive create (the empty
+// reservation is replaced by saveTicket's atomic rename). Hash style (default)
+// generates a random suffix — no directory scan and no cross-branch collisions;
+// sequential style scans for the highest existing number.
 func (s *Store) allocID(prefix string) (string, error) {
 	if err := os.MkdirAll(s.ticketsDir(), 0o755); err != nil {
 		return "", err
 	}
+	if s.cfg.IDStyle == "sequential" {
+		return s.allocSequential(prefix)
+	}
+	return s.allocHash(prefix)
+}
+
+func (s *Store) allocHash(prefix string) (string, error) {
+	for i := 0; i < 20; i++ {
+		id := ticket.MakeID(prefix, s.idSuffix())
+		f, err := os.OpenFile(s.ticketPath(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.Close()
+			return id, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+	}
+	return "", errors.New("could not allocate a unique ticket id")
+}
+
+func (s *Store) allocSequential(prefix string) (string, error) {
 	max := 0
 	if entries, err := os.ReadDir(s.ticketsDir()); err == nil {
 		for _, e := range entries {

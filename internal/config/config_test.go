@@ -90,6 +90,22 @@ func TestConfigPartialAttachmentsGetsDefaults(t *testing.T) {
 	}
 }
 
+func TestIDStyleDefaultAndValidation(t *testing.T) {
+	if c := Default("x"); c.IDStyle != "hash" {
+		t.Errorf("default idStyle = %q, want hash", c.IDStyle)
+	}
+	bad := Default("x")
+	bad.IDStyle = "weird"
+	if len(bad.Validate()) == 0 {
+		t.Errorf("invalid idStyle should be flagged")
+	}
+	seq := Default("x")
+	seq.IDStyle = "sequential"
+	if problems := seq.Validate(); len(problems) != 0 {
+		t.Errorf("sequential should be valid: %v", problems)
+	}
+}
+
 func TestConfigValidateCatchesProblems(t *testing.T) {
 	c := Default("x")
 	c.Git.Backend = "svn"

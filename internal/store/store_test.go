@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,20 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// scaffold creates a fresh .pine/ tree and opens a store over it.
-func scaffold(t *testing.T) *Store {
+// scaffold creates a fresh .pine/ tree (sequential ids for deterministic
+// BUG-001… assertions) and opens a store over it.
+func scaffold(t *testing.T) *Store { return scaffoldStyle(t, "sequential") }
+
+// scaffoldHash is scaffold with the default hash id style.
+func scaffoldHash(t *testing.T) *Store { return scaffoldStyle(t, "hash") }
+
+func scaffoldStyle(t *testing.T, style string) *Store {
 	t.Helper()
 	pine := filepath.Join(t.TempDir(), ".pine")
 	must(t, os.MkdirAll(filepath.Join(pine, "tickets"), 0o755))
-	cfgB, err := config.Default("test").Bytes()
+	cfg := config.Default("test")
+	cfg.IDStyle = style
+	cfgB, err := cfg.Bytes()
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(pine, "config.json"), cfgB, 0o644))
 	bB, err := config.DefaultBoard().Bytes()
@@ -33,6 +42,47 @@ func scaffold(t *testing.T) *Store {
 	s, err := Open(pine)
 	must(t, err)
 	return s
+}
+
+func TestHashIDsUniqueAndValid(t *testing.T) {
+	s := scaffoldHash(t)
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+		must(t, err)
+		if !ticket.ValidID(tk.ID) || ticket.PrefixOf(tk.ID) != "BUG" {
+			t.Fatalf("bad hash id %q", tk.ID)
+		}
+		if seen[tk.ID] {
+			t.Fatalf("duplicate hash id %q", tk.ID)
+		}
+		seen[tk.ID] = true
+	}
+}
+
+func TestHashIDsAvoidCrossBranchCollision(t *testing.T) {
+	// Two independent stores over separate .pine dirs stand in for two branches;
+	// the same prefix on each must not yield the same filename.
+	a := scaffoldHash(t)
+	b := scaffoldHash(t)
+	ta, err := a.Create(CreateReq{Type: "bug", Title: "on branch a"})
+	must(t, err)
+	tb, err := b.Create(CreateReq{Type: "bug", Title: "on branch b"})
+	must(t, err)
+	if ta.ID == tb.ID {
+		t.Errorf("hash ids collided across branches: %q", ta.ID)
+	}
+}
+
+func TestSetIDGenDeterministic(t *testing.T) {
+	s := scaffoldHash(t)
+	i := 0
+	s.SetIDGen(func() string { i++; return fmt.Sprintf("aaaa%02d", i) })
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if tk.ID != "BUG-aaaa01" {
+		t.Errorf("id = %q, want BUG-aaaa01", tk.ID)
+	}
 }
 
 // steppingClock returns times that advance one second per call.

@@ -164,6 +164,31 @@ attachment references, orphaned directories, stray files).
 
 ---
 
+## Pine & git branches
+
+Because `.pine/` is committed alongside your code, **tickets are versioned with
+your branches** — exactly like source files. Switching branches changes which
+tickets you see: a ticket created and committed on `dev` won't appear while
+you're on `main` (it's not lost — it returns on `dev`, or when the branches
+merge). Uncommitted new tickets stay visible across branches, since git leaves
+untracked files alone.
+
+This is a deliberate trade-off of the "everything is files" model. If you prefer a
+single global backlog, keep `.pine/` mastered on your mainline (create/close
+tickets there and let them flow to feature branches via merge), or run Pine
+against a git worktree pinned to one branch.
+
+**Merge-safe IDs.** New tickets get random, collision-resistant IDs like
+`BUG-7f3k2a` by default (`"idStyle": "hash"` in `config.json`), so two branches —
+or two AI agents — never mint the same ID. Prefer the classic sequential
+`BUG-001`? Set `"idStyle": "sequential"`; just note that concurrent branches can
+then choose the same number and clash on merge (`pine doctor` flags duplicates).
+
+> For contrast, [Beads](https://github.com/gastownhall/beads) keeps issues
+> *global* across branches by storing them in a Dolt database on a separate git
+> ref rather than as files on your branches — a different point in the design
+> space (global + cell-level merge, but not plain, hand-editable files).
+
 ## Web UI
 
 `pine serve` (or `pine open`) serves the UI on `http://127.0.0.1:3412`

@@ -25,6 +25,7 @@ type Config struct {
 	Priorities  []string     `json:"priorities"`
 	Attachments Attachments  `json:"attachments"`
 	Git         Git          `json:"git"`
+	IDStyle     string       `json:"idStyle"` // "hash" (default) | "sequential"
 
 	// Extra holds unknown top-level keys, preserved verbatim on save.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -69,6 +70,7 @@ func Default(projectName string) *Config {
 		Priorities:  []string{"low", "medium", "high", "critical"},
 		Attachments: Attachments{Optimize: true, MaxDimension: 2000, Quality: 80, MaxVideoMB: 50},
 		Git:         Git{Backend: "auto"},
+		IDStyle:     "hash",
 	}
 }
 
@@ -124,6 +126,8 @@ func parseOnto(c *Config, data []byte) (*Config, error) {
 			_ = json.Unmarshal(raw, &c.Attachments)
 		case "git":
 			_ = json.Unmarshal(raw, &c.Git)
+		case "idStyle":
+			_ = json.Unmarshal(raw, &c.IDStyle)
 		default:
 			if c.Extra == nil {
 				c.Extra = map[string]json.RawMessage{}
@@ -144,6 +148,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		{"priorities", c.Priorities},
 		{"attachments", c.Attachments},
 		{"git", c.Git},
+		{"idStyle", c.IDStyle},
 	}, c.Extra)
 }
 
@@ -178,6 +183,11 @@ func (c *Config) Validate() []string {
 	}
 	if c.Attachments.MaxDimension <= 0 {
 		problems = append(problems, "config.attachments.maxDimension must be > 0")
+	}
+	switch c.IDStyle {
+	case "hash", "sequential":
+	default:
+		problems = append(problems, fmt.Sprintf("config.idStyle %q must be hash|sequential", c.IDStyle))
 	}
 	return problems
 }

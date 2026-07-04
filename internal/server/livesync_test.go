@@ -22,7 +22,9 @@ func TestLiveSyncExternalEdit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(pine, "tickets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfgB, _ := config.Default("test").Bytes()
+	cfg := config.Default("test")
+	cfg.IDStyle = "sequential"
+	cfgB, _ := cfg.Bytes()
 	os.WriteFile(filepath.Join(pine, "config.json"), cfgB, 0o644)
 	bB, _ := config.DefaultBoard().Bytes()
 	os.WriteFile(filepath.Join(pine, "board.json"), bB, 0o644)

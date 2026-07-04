@@ -29,9 +29,9 @@ var (
 	ErrConflict    = errors.New("ticket was modified concurrently")
 )
 
-// ticketFileRe matches valid ticket filenames; anything else in tickets/ is
-// ignored (editor droppings, .DS_Store, etc.).
-var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+\.md$`)
+// ticketFileRe matches valid ticket filenames (sequential BUG-001 or hash
+// BUG-7f3k2a); anything else in tickets/ is ignored (editor droppings, etc.).
+var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[a-z0-9]+\.md$`)
 
 // Subdirectory and file names inside .pine/.
 const (
@@ -53,7 +53,8 @@ type Store struct {
 	cfg   *config.Config
 	board *config.Board
 
-	now func() time.Time // injectable clock (tests)
+	now      func() time.Time // injectable clock (tests)
+	idSuffix func() string    // injectable hash-suffix generator (tests)
 }
 
 // Open loads config, board, and all tickets from pineDir (the path to .pine).
@@ -71,12 +72,13 @@ func Open(pineDir string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{
-		root:  abs,
-		cache: map[string]*ticket.Ticket{},
-		hash:  map[string]string{},
-		cfg:   cfg,
-		board: board,
-		now:   time.Now,
+		root:     abs,
+		cache:    map[string]*ticket.Ticket{},
+		hash:     map[string]string{},
+		cfg:      cfg,
+		board:    board,
+		now:      time.Now,
+		idSuffix: ticket.NewSuffix,
 	}
 	if err := s.scanTickets(); err != nil {
 		return nil, err
@@ -89,6 +91,10 @@ func (s *Store) Root() string { return s.root }
 
 // SetClock overrides the time source; used by tests for deterministic output.
 func (s *Store) SetClock(now func() time.Time) { s.now = now }
+
+// SetIDGen overrides the hash-suffix generator; used by tests for deterministic
+// hash-style IDs.
+func (s *Store) SetIDGen(gen func() string) { s.idSuffix = gen }
 
 // Config returns the loaded configuration.
 func (s *Store) Config() *config.Config {
