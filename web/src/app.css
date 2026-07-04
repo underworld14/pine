@@ -1,0 +1,69 @@
+@import 'tailwindcss';
+
+/* Midnight Pine — a dense, terminal-adjacent dev tool aesthetic. */
+@theme {
+  --color-bg: #0e1210;
+  --color-surface: #151a17;
+  --color-surface-2: #1c2320;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-text: #e6eae7;
+  --color-dim: #9aa59e;
+  --color-accent: #34d399;
+  --color-accent-soft: rgba(52, 211, 153, 0.12);
+  --color-danger: #f87171;
+  --color-warn: #fbbf24;
+  --color-info: #60a5fa;
+  --font-sans: 'Inter var', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+}
+
+:root[data-theme='light'] {
+  --color-bg: #fafbfa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f0f3f1;
+  --color-border: rgba(0, 0, 0, 0.09);
+  --color-text: #14201a;
+  --color-dim: #5c6b63;
+  --color-accent: #059669;
+  --color-accent-soft: rgba(5, 150, 105, 0.1);
+}
+
+html, body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; cursor: pointer; }
+input, textarea, select { font: inherit; color: inherit; }
+kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface-2);
+  color: var(--color-dim);
+}
+.mono { font-family: var(--font-mono); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-surface-2); border-radius: 5px; }
+
+@keyframes flash-ring {
+  0% { box-shadow: 0 0 0 2px var(--color-accent); background: var(--color-accent-soft); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+.flash { animation: flash-ring 1.4s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash { animation: none; }
+  * { transition: none !important; }
+}

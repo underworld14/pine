@@ -1,0 +1,25 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - text: 🌲
+      - generic [ref=e6]: Pine
+    - button "+ New issue c" [ref=e7] [cursor=pointer]:
+      - text: + New issue
+      - generic [ref=e8]: c
+    - navigation [ref=e9]:
+      - link "Dashboard g d" [ref=e10] [cursor=pointer]:
+        - /url: /
+        - text: Dashboard
+        - generic [ref=e11]: g d
+      - link "Board g b" [ref=e12] [cursor=pointer]:
+        - /url: /board
+        - text: Board
+        - generic [ref=e13]: g b
+      - link "Search /" [ref=e14] [cursor=pointer]:
+        - /url: /search
+        - text: Search
+        - generic [ref=e15]: /
+    - generic [ref=e17]:
+      - generic [ref=e19]: connecting
+      - button "Toggle theme" [ref=e20] [cursor=pointer]: 🌙
+  - main [ref=e21]
