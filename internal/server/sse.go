@@ -61,6 +61,13 @@ func (h *hub) broadcast(event string, data map[string]any) {
 		select {
 		case ch <- msg:
 		default:
+			// A client whose buffer is full has fallen behind. Drop it so its
+			// EventSource reconnects and re-hydrates from /api/snapshot, rather
+			// than silently displaying stale state forever. (delete-during-range
+			// is safe; the reader observes the closed channel and returns, and its
+			// deferred unsubscribe is a no-op since we already removed it.)
+			delete(h.clients, ch)
+			close(ch)
 		}
 	}
 }

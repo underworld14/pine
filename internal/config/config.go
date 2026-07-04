@@ -84,11 +84,32 @@ func Load(path string) (*Config, error) {
 // Parse decodes config JSON, filling absent keys from defaults and retaining
 // unknown keys. The project name default is empty; callers set it as needed.
 func Parse(data []byte) (*Config, error) {
+	return parseOnto(Default(""), data)
+}
+
+// ParseOnto overlays the JSON's present keys onto a copy of base, so a partial
+// update (e.g. a config PUT) preserves any key the caller omitted instead of
+// resetting it to a default.
+func ParseOnto(base *Config, data []byte) (*Config, error) {
+	return parseOnto(base.clone(), data)
+}
+
+func (c *Config) clone() *Config {
+	n := *c
+	n.Types = append([]TicketType(nil), c.Types...)
+	n.Priorities = append([]string(nil), c.Priorities...)
+	n.Extra = map[string]json.RawMessage{}
+	for k, v := range c.Extra {
+		n.Extra[k] = v
+	}
+	return &n
+}
+
+func parseOnto(c *Config, data []byte) (*Config, error) {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
 		return nil, fmt.Errorf("config.json is not valid JSON: %w", err)
 	}
-	c := Default("")
 	for key, raw := range all {
 		switch key {
 		case "version":

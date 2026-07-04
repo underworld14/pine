@@ -61,8 +61,15 @@
   async function save(force = false) {
     if (!ticket) return;
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    // A normal save uses baseHash — the version the editor content is based on —
+    // NOT ticket.hash (which the SSE stream may have already advanced to the disk
+    // version). That is what lets the server return 409 when the file moved under
+    // us, instead of silently overwriting an agent's edit. A forced overwrite
+    // acknowledges the conflicting disk version explicitly.
+    const ifMatch = force ? (conflict?.hash ?? baseHash) : baseHash;
+    const opId = workspace.beginOp();
     try {
-      const updated = await api.patchTicket(id, { body: text }, force ? (conflict?.hash ?? ticket.hash) : ticket.hash);
+      const updated = await api.patchTicket(id, { body: text, opId }, ifMatch);
       workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
       baseHash = updated.hash;
       baseBody = updated.body ?? '';
@@ -127,7 +134,7 @@
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
     try {
-      const results = await api.upload(id, files);
+      const results = await api.upload(id, files, { opId: workspace.beginOp() });
       const ok = results.filter((r) => !r.error);
       if (ok.length) {
         const md = ok.map((r) => r.markdown).join('\n');

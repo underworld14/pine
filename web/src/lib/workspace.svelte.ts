@@ -124,6 +124,13 @@ class WorkspaceStore {
     return id;
   }
 
+  // beginOp registers a new operation id so its echoed SSE event is recognized as
+  // our own (no flash). Callers that mutate outside move/patch/create (e.g. the
+  // editor's body save and attachment uploads) use this and pass the id along.
+  beginOp(): string {
+    return this.trackOp();
+  }
+
   applyEvent(ev: PineEvent) {
     const external = ev.origin?.source === 'fs' || !this.recentOps.has(ev.origin?.opId ?? '');
     switch (ev.type) {

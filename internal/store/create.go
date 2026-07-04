@@ -77,6 +77,9 @@ func (s *Store) Create(req CreateReq) (*ticket.Ticket, error) {
 		Body:     body,
 	}
 	if err := s.saveTicket(t); err != nil {
+		// Clean up the empty O_EXCL reservation so a failed write does not leave a
+		// zero-byte file that would parse as a degraded ticket.
+		_ = os.Remove(s.ticketPath(id))
 		return nil, err
 	}
 	return cloneTicket(t), nil

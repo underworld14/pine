@@ -56,6 +56,27 @@ func TestConfigRoundTripPreservesUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestParseOntoPreservesOmittedKeys(t *testing.T) {
+	base := Default("my-app")
+	base.Attachments.Quality = 55
+	updated, err := ParseOnto(base, []byte(`{"git":{"backend":"cli"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Git.Backend != "cli" {
+		t.Errorf("present key not applied: %q", updated.Git.Backend)
+	}
+	if updated.Attachments.Quality != 55 {
+		t.Errorf("omitted key was reset to default: %d", updated.Attachments.Quality)
+	}
+	if updated.Project.Name != "my-app" {
+		t.Errorf("omitted project name was reset")
+	}
+	if base.Git.Backend == "cli" {
+		t.Errorf("ParseOnto must not mutate base")
+	}
+}
+
 func TestConfigPartialAttachmentsGetsDefaults(t *testing.T) {
 	c, err := Parse([]byte(`{"attachments": {"quality": 90}}`))
 	if err != nil {

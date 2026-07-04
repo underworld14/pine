@@ -155,13 +155,14 @@ export const api = {
   files: (q: string) => req<{ files: string[] }>('GET', `/api/files?q=${encodeURIComponent(q)}`),
   ticketPrompt: async (id: string) => (await fetch(`/api/tickets/${id}/prompt`)).text(),
   context: async () => (await fetch('/api/context')).text(),
-  async upload(id: string, files: File[], onProgress?: (p: number) => void): Promise<AttachmentResult[]> {
+  async upload(id: string, files: File[], opts: { opId?: string; onProgress?: (p: number) => void } = {}): Promise<AttachmentResult[]> {
     const form = new FormData();
     for (const f of files) form.append('files', f, f.name);
+    const url = `/api/tickets/${id}/attachments${opts.opId ? `?opId=${encodeURIComponent(opts.opId)}` : ''}`;
     return await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `/api/tickets/${id}/attachments`);
-      xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+      xhr.open('POST', url);
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable && opts.onProgress) opts.onProgress(e.loaded / e.total); };
       xhr.onload = () => {
         try {
           const data = JSON.parse(xhr.responseText);

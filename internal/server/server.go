@@ -106,7 +106,8 @@ func (srv *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("could not read body"))
 		return
 	}
-	cfg, err := config.Parse(body)
+	// Overlay onto the current config so omitting a key does not reset it.
+	cfg, err := config.ParseOnto(srv.store.Config(), body)
 	if err != nil {
 		writeErr(w, badRequest(err.Error()))
 		return

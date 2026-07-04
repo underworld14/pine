@@ -48,7 +48,7 @@
         body: composeBody()
       });
       if (staged.length) {
-        try { await api.upload(t.id, staged); } catch { toasts.push('Attachment upload failed', 'error'); }
+        try { await api.upload(t.id, staged, { opId: workspace.beginOp() }); } catch { toasts.push('Attachment upload failed', 'error'); }
       }
       ui.closeModal();
       toasts.push(`${t.id} created`, 'success', { href: `/tickets/${t.id}`, action: 'View' });

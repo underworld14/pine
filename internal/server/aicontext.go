@@ -13,6 +13,7 @@ import (
 func (srv *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	md := contextgen.Context(srv.store, srv.gitSnapshot(), time.Now())
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Write([]byte(md))
 }
 
@@ -28,5 +29,6 @@ func (srv *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Write([]byte(md))
 }

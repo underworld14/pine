@@ -38,6 +38,9 @@ func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Reques
 		writeErr(w, err)
 		return
 	}
+	// Cap the whole request body so a huge multipart upload cannot spool
+	// unbounded bytes to disk.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeErr(w, badRequest("could not parse upload: "+err.Error()))
 		return
