@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/izzadev/pine/internal/config"
+	"github.com/izzadev/pine/internal/gitx"
 	"github.com/izzadev/pine/internal/store"
 	"github.com/izzadev/pine/internal/view"
 )
@@ -21,11 +23,19 @@ type Server struct {
 	store   *store.Store
 	version string
 	hub     *hub
+	search  *searchIndex
+
+	git       gitx.Client
+	gitMu     sync.RWMutex
+	gitStatus gitx.Status
 }
 
 // New constructs a server over the given store.
 func New(st *store.Store, version string) *Server {
-	return &Server{store: st, version: version, hub: newHub()}
+	srv := &Server{store: st, version: version, hub: newHub()}
+	srv.initSearch()
+	srv.initGit()
+	return srv
 }
 
 // Handler builds the chi router with all routes and middleware.
@@ -50,6 +60,9 @@ func (srv *Server) Handler() http.Handler {
 		r.Get("/board", srv.handleBoard)
 		r.Get("/config", srv.handleGetConfig)
 		r.Put("/config", srv.handlePutConfig)
+		r.Get("/search", srv.handleSearch)
+		r.Get("/git", srv.handleGit)
+		r.Get("/files", srv.handleFiles)
 		r.Get("/events", srv.handleEvents)
 	})
 
@@ -72,7 +85,7 @@ func (srv *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		"tickets": view.BuildAll(srv.store, true),
 		"board":   srv.buildBoard(),
 		"config":  srv.store.Config(),
-		"git":     nil,
+		"git":     srv.gitSnapshot(),
 		"seq":     0,
 	})
 }

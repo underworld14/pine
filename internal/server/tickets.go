@@ -62,6 +62,7 @@ func (srv *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv.setETag(w, t.ID)
+	srv.reindex(t.ID)
 	v := view.Build(srv.store, srv.store.Graph(), t, true)
 	srv.emit("ticket.created", apiOrigin(b.OpID), map[string]any{"ticket": v})
 	writeJSON(w, http.StatusCreated, v)
@@ -142,6 +143,7 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv.setETag(w, id)
+	srv.reindex(id)
 	v := view.Build(srv.store, srv.store.Graph(), updated, true)
 	srv.emit("ticket.updated", apiOrigin(p.OpID), map[string]any{"ticket": v})
 	writeJSON(w, http.StatusOK, v)
@@ -153,6 +155,7 @@ func (srv *Server) handleDeleteTicket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	srv.deindex(id)
 	srv.emit("ticket.deleted", apiOrigin(r.URL.Query().Get("opId")), map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }

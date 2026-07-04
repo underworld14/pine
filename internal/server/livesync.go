@@ -11,12 +11,14 @@ import (
 // changes over SSE. It returns a stop function. When the watcher cannot start,
 // the server still runs (without live updates).
 func (srv *Server) StartLiveSync() func() {
+	done := make(chan struct{})
+	srv.startGitPoller(done)
+
 	w, err := watch.New(srv.store.Root())
 	if err != nil {
 		log.Printf("pine: file watcher disabled: %v", err)
-		return func() {}
+		return func() { close(done) }
 	}
-	done := make(chan struct{})
 	go func() {
 		for {
 			select {
@@ -49,6 +51,7 @@ func (srv *Server) applyWatchEvent(ev watch.Event) {
 			return
 		}
 		if ch.Removed {
+			srv.deindex(ch.ID)
 			srv.emit("ticket.deleted", fsOrigin(), map[string]any{"id": ch.ID})
 			return
 		}
@@ -57,6 +60,7 @@ func (srv *Server) applyWatchEvent(ev watch.Event) {
 			if err != nil {
 				return
 			}
+			srv.reindex(ch.ID)
 			srv.emit("ticket.updated", fsOrigin(), map[string]any{
 				"ticket": view.Build(srv.store, srv.store.Graph(), t, true),
 			})
