@@ -1,0 +1,117 @@
+{
+  "name": "pine-vscode",
+  "displayName": "Pine",
+  "description": "Open your Pine board (git-native kanban & issues) directly inside VS Code — no manual `pine serve`.",
+  "version": "0.1.0",
+  "publisher": "underworld14",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/underworld14/pine.git",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/underworld14/pine#readme",
+  "bugs": {
+    "url": "https://github.com/underworld14/pine/issues"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "pine",
+    "kanban",
+    "issues",
+    "project management",
+    "git"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.pine/config.json"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "pine.openBoard",
+        "title": "Open Board",
+        "category": "Pine"
+      },
+      {
+        "command": "pine.createBug",
+        "title": "Create Bug",
+        "category": "Pine"
+      },
+      {
+        "command": "pine.createFeature",
+        "title": "Create Feature",
+        "category": "Pine"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "pine.openBoard",
+          "when": "pine.hasWorkspace"
+        },
+        {
+          "command": "pine.createBug",
+          "when": "pine.hasWorkspace"
+        },
+        {
+          "command": "pine.createFeature",
+          "when": "pine.hasWorkspace"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Pine",
+      "properties": {
+        "pine.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `pine` binary. Overrides PATH lookup and auto-download."
+        },
+        "pine.autoDownload": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "If `pine` is not found on PATH, download the matching release binary from GitHub."
+        },
+        "pine.server.port": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null,
+          "markdownDescription": "Preferred port for `pine serve`. Leave empty to auto-select a free port."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "compile-tests": "tsc -p ./",
+    "typecheck": "tsc -p ./ --noEmit",
+    "lint": "tsc -p ./ --noEmit",
+    "pretest": "npm run compile-tests && npm run build",
+    "test:unit": "npm run compile-tests && mocha \"out/test/unit/**/*.test.js\"",
+    "test:e2e": "npm run compile-tests && mocha --timeout 30000 \"out/test/e2e/**/*.test.js\"",
+    "test:integration": "npm run pretest && node ./out/test/runTest.js",
+    "test": "npm run test:unit && npm run test:e2e",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.2",
+    "glob": "^10.3.10",
+    "mocha": "^10.4.0",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,67 @@
+name: vscode-extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'editors/vscode/**'
+      - '.github/workflows/vscode.yml'
+  pull_request:
+    paths:
+      - 'editors/vscode/**'
+      - '.github/workflows/vscode.yml'
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build pine with embedded UI
+        run: |
+          (cd web && npm ci && npm run build)
+          mkdir -p .bin
+          ROOT=$(pwd -W 2>/dev/null || pwd)
+          if [ "$RUNNER_OS" = "Windows" ]; then OUT="$ROOT/.bin/pine.exe"; else OUT="$ROOT/.bin/pine"; fi
+          go build -tags embedassets -o "$OUT" ./cmd/pine
+          echo "PINE_BIN=$OUT" >> "$GITHUB_ENV"
+
+      - name: Install extension dependencies
+        run: npm install
+        working-directory: editors/vscode
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: editors/vscode
+
+      - name: Unit + e2e tests
+        run: npm test
+        working-directory: editors/vscode
+
+      - name: Integration tests (Linux, headless)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+        working-directory: editors/vscode
+
+      - name: Package VSIX
+        run: npm run package
+        working-directory: editors/vscode
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pine-vscode-${{ matrix.os }}
+          path: editors/vscode/*.vsix
+          if-no-files-found: error

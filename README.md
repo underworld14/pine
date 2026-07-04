@@ -210,6 +210,17 @@ with an oversize warning. `pine optimize` back-fills files dropped in by hand.
 
 ---
 
+## VS Code extension
+
+Prefer to stay in your editor? The **[Pine VS Code extension](editors/vscode/)**
+opens the same board in a VS Code tab — no terminal, no manual `pine serve`. Run
+**Pine: Open Board** and it starts Pine for you and embeds the UI; **Pine: Create
+Bug / Create Feature** add tickets from the command palette. It reuses the exact
+web UI, so live sync, attachments, and search all behave identically. See
+[`editors/vscode/README.md`](editors/vscode/README.md) for details.
+
+---
+
 ## Development
 
 ```sh
