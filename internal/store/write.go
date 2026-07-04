@@ -1,10 +1,13 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/izzadev/pine/internal/config"
 	"github.com/izzadev/pine/internal/ticket"
 )
 
@@ -62,11 +65,21 @@ func renameWithRetry(from, to string) error {
 	return err
 }
 
-// writeConfigFile atomically writes config.json.
-func (s *Store) writeConfigFile() error {
-	data, err := s.cfg.Bytes()
+// SaveConfig validates and atomically writes a new configuration, updating the
+// in-memory copy on success.
+func (s *Store) SaveConfig(c *config.Config) error {
+	if problems := c.Validate(); len(problems) > 0 {
+		return fmt.Errorf("invalid config: %s", strings.Join(problems, "; "))
+	}
+	data, err := c.Bytes()
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(s.root, fileConfig), data)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := atomicWrite(filepath.Join(s.root, fileConfig), data); err != nil {
+		return err
+	}
+	s.cfg = c
+	return nil
 }

@@ -43,6 +43,8 @@ func newRootCmd() *cobra.Command {
 	// Commands are registered per milestone as they are implemented.
 	root.AddCommand(
 		newInitCmd(),
+		newServeCmd(),
+		newOpenCmd(),
 		newListCmd(),
 		newShowCmd(),
 		newCreateCmd(),
