@@ -2,6 +2,11 @@
 
 **A git-native, local-first workspace for AI-assisted development.**
 
+[![CI](https://github.com/underworld14/pine/actions/workflows/ci.yml/badge.svg)](https://github.com/underworld14/pine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/underworld14/pine?sort=semver)](https://github.com/underworld14/pine/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/underworld14/pine)](https://goreportcard.com/report/github.com/underworld14/pine)
+
 Pine keeps your bugs, features, epics, and project context as plain files inside
 your repository, so humans and AI agents (Claude Code, Codex, Gemini CLI, …) work
 from the same source of truth. No cloud, no accounts, no database — the repo is
@@ -18,20 +23,52 @@ When you drag a card, the file changes on disk. It is the same data, always.
 
 ---
 
-## Install / build
+## Installation
 
-Requires Go 1.24+ and Node 20+ (only to build the embedded UI).
+### Download a release (recommended)
+
+Grab the binary for your platform from the
+[Releases page](https://github.com/underworld14/pine/releases). Each archive is a
+single self-contained `pine` binary with the web UI built in — no runtime
+dependencies.
+
+macOS / Linux:
 
 ```sh
-make build      # builds the SvelteKit UI and embeds it into ./pine
-./pine --help
+# pick the asset for your OS/arch, e.g. pine_0.1.0_darwin_arm64.tar.gz
+tar -xzf pine_*_*.tar.gz
+sudo mv pine /usr/local/bin/
+pine --version
 ```
 
-For backend-only development the UI is optional:
+Windows: download the `_windows_amd64.zip`, extract `pine.exe`, and add it to
+your PATH.
+
+### With Go
 
 ```sh
-make build-dev  # binary without the embedded UI (serves a dev placeholder)
-make dev        # runs `pine serve --dev`, proxying the UI to `npm run dev`
+go install github.com/underworld14/pine/cmd/pine@latest
+```
+
+This gives you the full CLI, HTTP API, and live sync. (The bundled web UI ships
+in the release binaries and `make build` only; a `go install` build serves a
+small placeholder page in place of the UI.)
+
+### Build from source
+
+Requires **Go 1.24+** and **Node 20+**.
+
+```sh
+git clone https://github.com/underworld14/pine
+cd pine
+make build            # builds the SvelteKit UI and embeds it into ./pine
+./pine --version
+```
+
+Backend-only (no Node required) — serves a dev placeholder for the UI:
+
+```sh
+make build-dev
 ```
 
 ---
@@ -163,6 +200,12 @@ Go (cobra CLI, chi router, Bleve in-memory search, fsnotify watcher, SSE) with a
 SvelteKit 2 / Svelte 5 / Tailwind v4 UI embedded via `go:embed`. WebP encoding is
 pure-Go (no cgo), so the binary cross-compiles cleanly.
 
+## Contributing
+
+Contributions of all kinds are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for local setup and how to run the test suite, and please open an issue for bugs
+or feature ideas.
+
 ## License
 
-MIT
+[MIT](LICENSE) © underworld14
