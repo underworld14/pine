@@ -12,8 +12,12 @@ import (
 )
 
 // saveTicket serializes a ticket, writes it atomically, and refreshes the cache
-// and hash. Callers must hold the write lock.
+// and hash. Callers must hold the write lock. Status and priority are normalized
+// to lowercase so API/CLI writes match how disk-parsed tickets are stored
+// (otherwise "Done" would never equal StatusDone in the dependency graph).
 func (s *Store) saveTicket(t *ticket.Ticket) error {
+	t.Status = strings.ToLower(strings.TrimSpace(t.Status))
+	t.Priority = strings.ToLower(strings.TrimSpace(t.Priority))
 	data := t.Serialize()
 	if err := atomicWrite(s.ticketPath(t.ID), data); err != nil {
 		return err

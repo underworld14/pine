@@ -13,6 +13,15 @@ import (
 // writes it atomically. Degraded tickets are rejected (their frontmatter is not
 // understood, so a rewrite would lose data). mut runs under the write lock.
 func (s *Store) Update(id string, mut func(*ticket.Ticket) error) (*ticket.Ticket, error) {
+	return s.UpdateIfMatch(id, "", mut)
+}
+
+// UpdateIfMatch is Update with an optimistic-concurrency precondition: when
+// expectedHash is non-empty it must equal the ticket's current content hash,
+// checked inside the write lock so the check and the write are atomic. A
+// mismatch returns ErrConflict. This closes the check-then-write race that a
+// separate pre-check outside the lock would leave open.
+func (s *Store) UpdateIfMatch(id, expectedHash string, mut func(*ticket.Ticket) error) (*ticket.Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -22,6 +31,9 @@ func (s *Store) Update(id string, mut func(*ticket.Ticket) error) (*ticket.Ticke
 	}
 	if cur.Degraded {
 		return nil, ErrDegraded
+	}
+	if expectedHash != "" && s.hash[id] != expectedHash {
+		return nil, ErrConflict
 	}
 	t := cloneTicket(cur)
 	if err := mut(t); err != nil {

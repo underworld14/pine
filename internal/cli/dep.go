@@ -36,7 +36,7 @@ func newDepAddCmd() *cobra.Command {
 			}
 			merged := mergeDeps(cur.Deps, upperAll(args[1:]))
 			if cyc := wouldCycle(s, id, merged); cyc != nil {
-				return fmt.Errorf("that dependency would create a cycle: %s", strings.Join(append(cyc, cyc[0]), " -> "))
+				return fmt.Errorf("that dependency would create a cycle among: %s", strings.Join(cyc, ", "))
 			}
 			if _, err := s.Update(id, func(u *ticket.Ticket) error {
 				u.Deps = merged

@@ -107,7 +107,7 @@ func Run(s *store.Store) *Report {
 	}
 
 	for _, cyc := range s.Graph().Cycles() {
-		r.err("dependency cycle: " + strings.Join(append(cyc, cyc[0]), " -> "))
+		r.err("dependency cycle among: " + strings.Join(cyc, ", "))
 	}
 
 	checkStrays(r, root)

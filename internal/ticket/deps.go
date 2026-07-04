@@ -8,6 +8,7 @@ type Graph struct {
 	byID     map[string]*Ticket
 	children map[string][]*Ticket // parent id -> children
 	inCycle  map[string]bool
+	sccs     [][]string // non-trivial strongly-connected components (cycles)
 }
 
 // NewGraph indexes the tickets and precomputes cycle membership.
@@ -92,61 +93,79 @@ func (g *Graph) EpicProgress(epicID string) (done, total int) {
 	return done, total
 }
 
-// Cycles returns each dependency cycle as an ordered list of ticket IDs, for
-// doctor to report. Deterministic across runs.
+// Cycles returns each dependency cycle as a sorted list of the ticket IDs that
+// participate in it (one entry per strongly-connected component of size > 1, plus
+// any self-dependency). Deterministic across runs.
 func (g *Graph) Cycles() [][]string {
-	var cycles [][]string
-	seen := map[string]bool{}
-	for id := range g.inCycle {
-		if seen[id] {
-			continue
-		}
-		cyc := g.recoverCycle(id)
-		for _, m := range cyc {
-			seen[m] = true
-		}
-		if len(cyc) > 0 {
-			cycles = append(cycles, cyc)
-		}
-	}
-	sort.Slice(cycles, func(i, j int) bool { return cycles[i][0] < cycles[j][0] })
-	return cycles
+	out := make([][]string, len(g.sccs))
+	copy(out, g.sccs)
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
 }
 
-// computeCycles marks every ticket that participates in a dependency cycle using
-// recursive DFS with colors (0=unvisited, 1=on-stack, 2=done).
+// computeCycles finds strongly-connected components via Tarjan's algorithm and
+// records those that represent real cycles: any component with more than one
+// member, or a single member that depends on itself. Every member of such a
+// component is a genuine cycle participant (mutually reachable), which fixes the
+// fabricated-path problem of naive back-edge tracing.
 func (g *Graph) computeCycles(tickets []*Ticket) {
-	color := make(map[string]int, len(tickets))
-	var onStack []string
+	index := 0
+	idx := make(map[string]int)
+	low := make(map[string]int)
+	onStack := make(map[string]bool)
+	var stack []string
 
-	var dfs func(id string)
-	dfs = func(id string) {
-		color[id] = 1
-		onStack = append(onStack, id)
-		if t := g.byID[id]; t != nil {
-			for _, dep := range t.Deps {
-				if g.byID[dep] == nil {
-					continue // dangling; not part of a cycle
+	var strongconnect func(v string)
+	strongconnect = func(v string) {
+		idx[v] = index
+		low[v] = index
+		index++
+		stack = append(stack, v)
+		onStack[v] = true
+
+		if t := g.byID[v]; t != nil {
+			for _, w := range t.Deps {
+				if g.byID[w] == nil {
+					continue // dangling edge; not part of any cycle
 				}
-				switch color[dep] {
-				case 0:
-					dfs(dep)
-				case 1:
-					// Back edge: everything from dep to the top of the stack is a cycle.
-					mark := false
-					for _, s := range onStack {
-						if s == dep {
-							mark = true
-						}
-						if mark {
-							g.inCycle[s] = true
+				if _, seen := idx[w]; !seen {
+					strongconnect(w)
+					low[v] = min(low[v], low[w])
+				} else if onStack[w] {
+					low[v] = min(low[v], idx[w])
+				}
+			}
+		}
+
+		if low[v] == idx[v] {
+			var comp []string
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				onStack[w] = false
+				comp = append(comp, w)
+				if w == v {
+					break
+				}
+			}
+			selfLoop := false
+			if len(comp) == 1 {
+				if t := g.byID[comp[0]]; t != nil {
+					for _, d := range t.Deps {
+						if d == comp[0] {
+							selfLoop = true
 						}
 					}
 				}
 			}
+			if len(comp) > 1 || selfLoop {
+				sort.Strings(comp)
+				for _, m := range comp {
+					g.inCycle[m] = true
+				}
+				g.sccs = append(g.sccs, comp)
+			}
 		}
-		onStack = onStack[:len(onStack)-1]
-		color[id] = 2
 	}
 
 	ids := make([]string, 0, len(tickets))
@@ -155,31 +174,8 @@ func (g *Graph) computeCycles(tickets []*Ticket) {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if color[id] == 0 {
-			dfs(id)
+		if _, seen := idx[id]; !seen {
+			strongconnect(id)
 		}
 	}
-}
-
-// recoverCycle walks deps edges staying within cycle members to reconstruct one
-// cycle path.
-func (g *Graph) recoverCycle(start string) []string {
-	var path []string
-	visited := map[string]bool{}
-	cur := start
-	for cur != "" && !visited[cur] {
-		visited[cur] = true
-		path = append(path, cur)
-		next := ""
-		if t := g.byID[cur]; t != nil {
-			for _, dep := range t.Deps {
-				if g.inCycle[dep] {
-					next = dep
-					break
-				}
-			}
-		}
-		cur = next
-	}
-	return path
 }

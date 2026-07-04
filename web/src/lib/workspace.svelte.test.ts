@@ -30,6 +30,16 @@ describe('workspace columns', () => {
     });
   });
 
+  it('places a status-less ticket into the first column', () => {
+    withEffects(() => {
+      workspace.board = { columns: [{ status: 'todo', title: 'Todo' }, { status: 'done', title: 'Done' }], unmapped: [] };
+      workspace.tickets = { x: mk('x', '') };
+      flushSync();
+      const todo = workspace.columns.find((c) => c.status === 'todo');
+      expect(todo?.tickets.map((t) => t.id)).toContain('x');
+    });
+  });
+
   it('sorts a column by priority then recency', () => {
     withEffects(() => {
       workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };

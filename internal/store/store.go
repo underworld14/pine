@@ -26,6 +26,7 @@ var (
 	ErrExists      = errors.New("ticket already exists")
 	ErrDegraded    = errors.New("ticket is malformed and cannot be edited through Pine")
 	ErrUnknownType = errors.New("unknown ticket type")
+	ErrConflict    = errors.New("ticket was modified concurrently")
 )
 
 // ticketFileRe matches valid ticket filenames; anything else in tickets/ is

@@ -91,6 +91,37 @@ func TestDiamondNoFalseCycle(t *testing.T) {
 	}
 }
 
+func TestCyclesReportsSCCMembersNotFabricatedPaths(t *testing.T) {
+	// A depends on B and C; both B and C depend back on A. All three are mutually
+	// reachable, so it is a single strongly-connected component — not two cycles
+	// with a fabricated C->A->B path.
+	a := tk("A-001", "todo", "B-001", "C-001")
+	b := tk("B-001", "todo", "A-001")
+	c := tk("C-001", "todo", "A-001")
+	g := NewGraph([]*Ticket{a, b, c})
+	cycles := g.Cycles()
+	if len(cycles) != 1 {
+		t.Fatalf("expected one cycle group, got %d: %v", len(cycles), cycles)
+	}
+	if len(cycles[0]) != 3 {
+		t.Errorf("cycle group should contain all 3 members: %v", cycles[0])
+	}
+	if !g.Blocked("A-001") || !g.Blocked("B-001") || !g.Blocked("C-001") {
+		t.Errorf("all cycle members must be blocked")
+	}
+}
+
+func TestSelfDependencyIsACycle(t *testing.T) {
+	a := tk("A-001", "todo", "A-001")
+	g := NewGraph([]*Ticket{a})
+	if !g.Blocked("A-001") || !g.Deps("A-001").InCycle {
+		t.Errorf("a self-dependency should be a cycle")
+	}
+	if len(g.Cycles()) != 1 {
+		t.Errorf("expected one cycle for a self-dependency: %v", g.Cycles())
+	}
+}
+
 func TestEpicChildrenAndProgress(t *testing.T) {
 	e := tk("EPIC-001", "doing")
 	c1 := tk("BUG-001", "done")

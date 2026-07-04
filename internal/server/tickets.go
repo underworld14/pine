@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -98,23 +99,10 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest(err.Error()))
 		return
 	}
-	// Optimistic concurrency: If-Match must equal the current content hash.
-	if ifm := strings.Trim(r.Header.Get("If-Match"), `"`); ifm != "" {
-		cur, ok := srv.store.Hash(id)
-		if !ok {
-			writeErr(w, store.ErrNotFound)
-			return
-		}
-		if ifm != cur {
-			t, _ := srv.store.Get(id)
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":   map[string]any{"code": "conflict", "message": "ticket changed on disk"},
-				"current": view.Build(srv.store, srv.store.Graph(), t, true),
-			})
-			return
-		}
-	}
-	updated, err := srv.store.Update(id, func(u *ticket.Ticket) error {
+	// Optimistic concurrency: If-Match is checked atomically with the write inside
+	// the store, so a lost update cannot slip between the check and the mutation.
+	ifm := strings.Trim(r.Header.Get("If-Match"), `"`)
+	updated, err := srv.store.UpdateIfMatch(id, ifm, func(u *ticket.Ticket) error {
 		if p.Title != nil {
 			u.Title = *p.Title
 		}
@@ -138,6 +126,14 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	if errors.Is(err, store.ErrConflict) {
+		t, _ := srv.store.Get(id)
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   map[string]any{"code": "conflict", "message": "ticket changed on disk"},
+			"current": view.Build(srv.store, srv.store.Graph(), t, true),
+		})
+		return
+	}
 	if err != nil {
 		writeErr(w, err)
 		return

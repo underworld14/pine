@@ -213,6 +213,36 @@ func TestHashChangesOnUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateIfMatchConflict(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	h1, _ := s.Hash(tk.ID)
+
+	// Correct hash succeeds and changes the hash.
+	if _, err := s.UpdateIfMatch(tk.ID, h1, func(u *ticket.Ticket) error { u.Title = "a"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// The now-stale hash must be rejected as a conflict.
+	if _, err := s.UpdateIfMatch(tk.ID, h1, func(u *ticket.Ticket) error { u.Title = "b"; return nil }); err != ErrConflict {
+		t.Errorf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestStatusNormalizedOnWrite(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x", Status: "Doing"})
+	must(t, err)
+	if tk.Status != "doing" {
+		t.Errorf("create status = %q, want lowercased", tk.Status)
+	}
+	up, err := s.Update(tk.ID, func(u *ticket.Ticket) error { u.Status = "DONE"; return nil })
+	must(t, err)
+	if up.Status != "done" {
+		t.Errorf("update status = %q, want lowercased", up.Status)
+	}
+}
+
 func TestListFilter(t *testing.T) {
 	s := scaffold(t)
 	if _, err := s.Create(CreateReq{Type: "bug", Title: "a", Labels: []string{"ui"}}); err != nil {

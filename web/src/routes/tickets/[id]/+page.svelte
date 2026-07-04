@@ -14,7 +14,8 @@
   let mode = $state<'preview' | 'split' | 'edit'>('preview');
   let text = $state('');
   let baseHash = $state('');
-  let dirty = $derived(!!ticket && text !== (ticket.body ?? '') && baseHash === ticket.hash);
+  let baseBody = $state(''); // the body at baseHash — dirtiness is measured against this
+  let dirty = $derived(text !== baseBody);
   let conflict = $state<Ticket | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -24,17 +25,21 @@
     if (!t) return;
     if (baseHash === '') {
       text = t.body ?? '';
+      baseBody = t.body ?? '';
       baseHash = t.hash;
       return;
     }
     if (t.hash !== baseHash) {
-      const isDirty = text !== '' && text !== (t.body ?? '') && !textMatchesBase(t);
-      if (!isDirty) {
+      // Disk changed under us. If the editor is clean (unchanged from our base),
+      // adopt the new version silently — the "an agent rewrote it while I watched"
+      // moment. If the editor is dirty, flag a conflict instead of clobbering.
+      if (text === baseBody) {
         text = t.body ?? '';
+        baseBody = t.body ?? '';
         baseHash = t.hash;
         conflict = null;
       } else {
-        conflict = t; // changed on disk while editing
+        conflict = t;
       }
     }
   });
@@ -45,14 +50,11 @@
     if (id !== lastId) {
       lastId = id;
       baseHash = '';
+      baseBody = '';
       conflict = null;
       mode = 'preview';
     }
   });
-
-  function textMatchesBase(t: Ticket): boolean {
-    return false;
-  }
 
   const preview = $derived(renderMarkdown(mode === 'edit' ? '' : text));
 
@@ -63,6 +65,7 @@
       const updated = await api.patchTicket(id, { body: text }, force ? (conflict?.hash ?? ticket.hash) : ticket.hash);
       workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
       baseHash = updated.hash;
+      baseBody = updated.body ?? '';
       conflict = null;
       toasts.push('Saved', 'success');
     } catch (e) {
@@ -87,6 +90,7 @@
   function reloadFromDisk() {
     if (!conflict) return;
     text = conflict.body ?? '';
+    baseBody = conflict.body ?? '';
     baseHash = conflict.hash;
     workspace.tickets = { ...workspace.tickets, [conflict.id]: conflict };
     conflict = null;

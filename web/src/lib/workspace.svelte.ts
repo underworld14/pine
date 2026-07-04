@@ -39,10 +39,13 @@ class WorkspaceStore {
   columns = $derived.by<ColumnView[]>(() => {
     const b = this.board;
     if (!b) return [];
+    const first = b.columns[0]?.status;
     const cols: ColumnView[] = b.columns.map((c) => ({
       status: c.status,
       title: c.title,
-      tickets: this.sorted(this.list.filter((t) => t.status === c.status))
+      // A ticket with no status (e.g. an agent omitted the frontmatter key) falls
+      // into the first column rather than disappearing from the board.
+      tickets: this.sorted(this.list.filter((t) => t.status === c.status || (t.status === '' && c.status === first)))
     }));
     // Unmapped statuses render as an "Other" tray on the far right.
     const mapped = new Set(b.columns.map((c) => c.status));
@@ -167,7 +170,13 @@ class WorkspaceStore {
       const updated = await api.patchTicket(id, { status: toStatus, opId }, before.hash);
       this.tickets = { ...this.tickets, [id]: updated };
     } catch (e) {
-      this.tickets = { ...this.tickets, [id]: before }; // rollback
+      // Roll back only if no external update landed while the request was in
+      // flight (our optimistic copy kept `before.hash`; an external change would
+      // have replaced it with a different hash, which we must not clobber).
+      const cur = this.tickets[id];
+      if (cur && cur.hash === before.hash) {
+        this.tickets = { ...this.tickets, [id]: before };
+      }
       throw e;
     }
   }
