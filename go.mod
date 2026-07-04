@@ -4,13 +4,17 @@ go 1.26.4
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/gen2brain/webp v0.6.4
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/image v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/sys v0.13.0 // indirect

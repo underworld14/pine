@@ -44,6 +44,8 @@ func (srv *Server) Handler() http.Handler {
 			r.Put("/{id}", srv.handleUpdateTicket)
 			r.Patch("/{id}", srv.handleUpdateTicket)
 			r.Delete("/{id}", srv.handleDeleteTicket)
+			r.Post("/{id}/attachments", srv.handleUploadAttachments)
+			r.Delete("/{id}/attachments/{name}", srv.handleDeleteAttachment)
 		})
 		r.Get("/board", srv.handleBoard)
 		r.Get("/config", srv.handleGetConfig)
@@ -51,6 +53,7 @@ func (srv *Server) Handler() http.Handler {
 		r.Get("/events", srv.handleEvents)
 	})
 
+	r.Get("/attachments/{id}/{name}", srv.handleServeAttachment)
 	r.Get("/*", srv.handleStatic)
 	return r
 }
