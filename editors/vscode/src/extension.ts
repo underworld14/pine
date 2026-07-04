@@ -1,6 +1,6 @@
-// Extension entry point: wires commands, the status-bar item, and the
-// `pine.hasWorkspace` context key. All the real work lives in the focused
-// modules this file composes.
+// Extension entry point: wires commands, the status-bar item, the Activity Bar
+// view, the `pine.hasWorkspace` context key, and live `.pine` detection. All the
+// real work lives in the focused modules this file composes.
 import * as vscode from 'vscode';
 import { pineRoots, pickPineRoot } from './workspace';
 import { resolvePineBinary } from './binary';
@@ -36,6 +36,22 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refresh();
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refresh));
+
+  // Activity Bar view — an empty tree so its welcome content (the Open Board
+  // button) renders. It can grow into a real ticket list later.
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('pine.board', {
+      getChildren: () => [],
+      getTreeItem: (e: vscode.TreeItem) => e,
+    }),
+  );
+
+  // Live-detect `.pine` appearing or disappearing so the view + status bar update
+  // without a window reload.
+  const watcher = vscode.workspace.createFileSystemWatcher('**/.pine/config.json');
+  watcher.onDidCreate(refresh);
+  watcher.onDidDelete(refresh);
+  context.subscriptions.push(watcher);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('pine.openBoard', () => openBoard(context)),

@@ -30,9 +30,40 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.pine/config.json"
+    "workspaceContains:.pine/config.json",
+    "onView:pine.board"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pine",
+          "title": "Pine",
+          "icon": "media/pine-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "pine": [
+        {
+          "id": "pine.board",
+          "name": "Board",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "pine.board",
+        "when": "pine.hasWorkspace",
+        "contents": "Open your Pine kanban board in an editor tab.\n[Open Board](command:pine.openBoard)\n\nCreate a ticket:\n[New Bug](command:pine.createBug)\n[New Feature](command:pine.createFeature)"
+      },
+      {
+        "view": "pine.board",
+        "when": "!pine.hasWorkspace",
+        "contents": "No Pine workspace found in this folder.\n\nRun `pine init` in a terminal — this view updates automatically once `.pine/` exists."
+      }
+    ],
     "commands": [
       {
         "command": "pine.openBoard",
@@ -63,6 +94,13 @@
         {
           "command": "pine.createFeature",
           "when": "pine.hasWorkspace"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "pine.openBoard",
+          "when": "view == pine.board && pine.hasWorkspace",
+          "group": "navigation"
         }
       ]
     },
