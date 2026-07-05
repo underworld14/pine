@@ -16,8 +16,8 @@ import (
 // Default template and prompt files written by pine init. The fix prompt reuses
 // the same default the AI commands fall back to, so they never drift.
 const (
-	tmplBug     = "# Description\n\n# Steps to Reproduce\n\n# Expected\n\n# Actual\n\n# Related Files\n\n# Attachments\n"
-	tmplFeature = "# Description\n\n# Acceptance Criteria\n\n# Related Files\n\n# Attachments\n"
+	tmplBug     = "# Description\n\n# Steps to Reproduce\n\n# Expected\n\n# Actual\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Related Files\n\n# Attachments\n"
+	tmplFeature = "# Description\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Implementation Plan\n\n# Notes\n\n# Related Files\n\n# Attachments\n"
 	tmplEpic    = "# Description\n\n# Goals\n\n# Child Tickets\n"
 
 	promptFix = contextgen.DefaultFixTemplate

@@ -31,6 +31,7 @@ type Ticket struct {
 
 	Children     []ChildRef `json:"children,omitempty"`
 	EpicProgress *Progress  `json:"epicProgress,omitempty"`
+	Acceptance   *Progress  `json:"acceptance,omitempty"`
 
 	Hash        string                 `json:"hash"`
 	Degraded    bool                   `json:"degraded,omitempty"`
@@ -95,6 +96,7 @@ func Build(s *store.Store, g *ticket.Graph, t *ticket.Ticket, includeBody bool) 
 		done, total := g.EpicProgress(t.ID)
 		v.EpicProgress = &Progress{Done: done, Total: total}
 	}
+	v.Acceptance = acceptanceProgress(t.Body)
 	return v
 }
 
@@ -123,7 +125,17 @@ func BuildOffBranch(t *ticket.Ticket, branch string, includeBody bool) Ticket {
 	if includeBody {
 		v.Body = t.Body
 	}
+	v.Acceptance = acceptanceProgress(t.Body)
 	return v
+}
+
+// acceptanceProgress returns the AC checkbox progress, or nil when there are none.
+func acceptanceProgress(body string) *Progress {
+	done, total := ticket.AcceptanceProgress(body)
+	if total == 0 {
+		return nil
+	}
+	return &Progress{Done: done, Total: total}
 }
 
 // BuildAll returns views for every ticket, sorted by ID.

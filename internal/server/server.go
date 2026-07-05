@@ -62,6 +62,7 @@ func (srv *Server) Handler() http.Handler {
 			r.Get("/{id}", srv.handleGetTicket)
 			r.Put("/{id}", srv.handleUpdateTicket)
 			r.Patch("/{id}", srv.handleUpdateTicket)
+			r.Patch("/{id}/checklist", srv.handleSetChecklist)
 			r.Delete("/{id}", srv.handleDeleteTicket)
 			r.Post("/{id}/attachments", srv.handleUploadAttachments)
 			r.Delete("/{id}/attachments/{name}", srv.handleDeleteAttachment)

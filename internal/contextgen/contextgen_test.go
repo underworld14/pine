@@ -115,6 +115,23 @@ func TestPromptBadTemplateFallsBack(t *testing.T) {
 	}
 }
 
+func TestContextIncludesAcceptance(t *testing.T) {
+	s := scaffold(t)
+	s.Create(store.CreateReq{Type: "bug", Title: "AC critical", Priority: "critical",
+		Body: "# Acceptance Criteria\n- [x] a\n- [ ] b\n"})
+	s.Create(store.CreateReq{Type: "feature", Title: "AC medium", Priority: "medium",
+		Body: "# Acceptance Criteria\n- [ ] only one\n"})
+
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	md := Context(s, fakeGit(), now)
+	if !strings.Contains(md, "Acceptance Criteria") || !strings.Contains(md, "1/2") {
+		t.Errorf("context missing critical acceptance progress:\n%s", md)
+	}
+	if !strings.Contains(md, "## Acceptance Criteria Progress") || !strings.Contains(md, "FEAT-001") || !strings.Contains(md, "0/1") {
+		t.Errorf("context missing medium-priority acceptance progress:\n%s", md)
+	}
+}
+
 func TestExportGroupsByColumn(t *testing.T) {
 	s := scaffold(t)
 	s.Create(store.CreateReq{Type: "bug", Title: "Todo bug"})

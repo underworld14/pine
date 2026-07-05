@@ -44,6 +44,17 @@ func scaffoldStyle(t *testing.T, style string) *Store {
 	return s
 }
 
+func TestCreateSeedsAcceptanceCriteria(t *testing.T) {
+	s := scaffold(t)
+	for _, typ := range []string{"BUG", "FEAT"} {
+		tk, err := s.Create(CreateReq{Type: typ, Title: "x"})
+		must(t, err)
+		if !strings.Contains(tk.Body, "# Acceptance Criteria") {
+			t.Errorf("%s body missing Acceptance Criteria:\n%s", typ, tk.Body)
+		}
+	}
+}
+
 func TestHashIDsUniqueAndValid(t *testing.T) {
 	s := scaffoldHash(t)
 	seen := map[string]bool{}

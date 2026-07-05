@@ -33,6 +33,7 @@ export interface Ticket {
   inCycle?: boolean;
   children?: ChildRef[];
   epicProgress?: { done: number; total: number };
+  acceptance?: { done: number; total: number };
   hash: string;
   degraded?: boolean;
   body?: string;
@@ -153,6 +154,8 @@ export const api = {
   getTicket: (id: string) => req<Ticket>('GET', `/api/tickets/${id}`),
   patchTicket: (id: string, patch: Record<string, unknown>, ifMatch?: string) =>
     req<Ticket>('PATCH', `/api/tickets/${id}`, patch, ifMatch ? { 'If-Match': ifMatch } : {}),
+  setChecklistItem: (id: string, index: number, checked: boolean, ifMatch?: string, opId?: string) =>
+    req<Ticket>('PATCH', `/api/tickets/${id}/checklist`, { index, checked, opId }, ifMatch ? { 'If-Match': ifMatch } : {}),
   deleteTicket: (id: string, opId?: string) =>
     req<void>('DELETE', `/api/tickets/${id}${opId ? `?opId=${opId}` : ''}`),
   search: (params: Record<string, string>) => {

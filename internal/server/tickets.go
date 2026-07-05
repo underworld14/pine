@@ -151,6 +151,52 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
+// setChecklistBody is the PATCH /checklist request.
+type setChecklistBody struct {
+	Index   int    `json:"index"`
+	Checked bool   `json:"checked"`
+	OpID    string `json:"opId"`
+}
+
+func (srv *Server) handleSetChecklist(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if branch, ok := srv.offBranchRef(id); ok {
+		writeErr(w, readOnlyBranch(id, branch))
+		return
+	}
+	var b setChecklistBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, badRequest(err.Error()))
+		return
+	}
+	ifm := strings.Trim(r.Header.Get("If-Match"), `"`)
+	updated, err := srv.store.UpdateIfMatch(id, ifm, func(t *ticket.Ticket) error {
+		nb, ok := ticket.SetChecklistItem(t.Body, b.Index, b.Checked)
+		if !ok {
+			return badRequest("checklist index out of range")
+		}
+		t.Body = nb
+		return nil
+	})
+	if errors.Is(err, store.ErrConflict) {
+		cur, _ := srv.store.Get(id)
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   map[string]any{"code": "conflict", "message": "ticket changed on disk"},
+			"current": view.Build(srv.store, srv.store.Graph(), cur, true),
+		})
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	srv.setETag(w, id)
+	srv.reindex(id)
+	v := view.Build(srv.store, srv.store.Graph(), updated, true)
+	srv.emit("ticket.updated", apiOrigin(b.OpID), map[string]any{"ticket": v})
+	writeJSON(w, http.StatusOK, v)
+}
+
 func (srv *Server) handleDeleteTicket(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if branch, ok := srv.offBranchRef(id); ok {

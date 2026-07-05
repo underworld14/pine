@@ -12,8 +12,8 @@ import (
 // Built-in body templates, used when no templates/<type>.md file exists. They
 // begin with a newline so the file has a blank line after the frontmatter.
 const (
-	bugTemplate     = "\n# Description\n\n# Steps\n\n# Expected\n\n# Actual\n\n# Related Files\n\n# Attachments\n"
-	featureTemplate = "\n# Description\n\n# Acceptance Criteria\n\n# Related Files\n\n# Attachments\n"
+	bugTemplate     = "\n# Description\n\n# Steps\n\n# Expected\n\n# Actual\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Related Files\n\n# Attachments\n"
+	featureTemplate = "\n# Description\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Implementation Plan\n\n# Notes\n\n# Related Files\n\n# Attachments\n"
 	epicTemplate    = "\n# Description\n\n# Goals\n\n# Child Tickets\n"
 )
 

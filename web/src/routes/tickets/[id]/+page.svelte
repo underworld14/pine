@@ -8,6 +8,7 @@
   import { priorityMeta, labelColor } from '$lib/ui-helpers';
   import { relTime, bytes } from '$lib/format';
   import { reconcileEditor } from '$lib/ticket-editor';
+  import TicketGraph from '$lib/components/TicketGraph.svelte';
 
   const id = $derived($page.params.id);
   const ticket = $derived(workspace.get(id));
@@ -133,6 +134,33 @@
     await setField({ labels: ticket.labels.filter((x) => x !== l) });
   }
 
+  async function onChecklistChange(e: Event) {
+    if (!ticket || readOnly || dirty) {
+      const target = e.target as HTMLElement;
+      if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+        target.checked = !target.checked;
+        if (dirty) toasts.push('Save or discard body edits before toggling checkboxes', 'error');
+      }
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+    const boxes = Array.from((e.currentTarget as HTMLElement).querySelectorAll('input[type=checkbox]'));
+    const index = boxes.indexOf(target);
+    if (index < 0) return;
+    try {
+      const updated = await api.setChecklistItem(id, index, target.checked, baseHash, workspace.beginOp());
+      workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+      baseHash = updated.hash;
+      baseBody = updated.body ?? '';
+      text = updated.body ?? '';
+    } catch (err) {
+      target.checked = !target.checked;
+      if (err instanceof ApiError && err.status === 409 && err.current) conflict = err.current;
+      else toasts.push(err instanceof Error ? err.message : 'Update failed', 'error');
+    }
+  }
+
   async function uploadFiles(files: File[]) {
     if (!files.length || readOnly) return;
     try {
@@ -205,26 +233,12 @@
         {/if}
       </div>
       <span class="updated">updated {relTime(ticket.updated)}</span>
+      {#if ticket.acceptance?.total}<span class="updated">AC {ticket.acceptance.done}/{ticket.acceptance.total}</span>{/if}
     </div>
 
-    {#if ticket.parent || ticket.deps.length}
-      <div class="rels">
-        {#if ticket.parent}<span>epic: <a class="mono" href={`/tickets/${ticket.parent}`}>{ticket.parent}</a></span>{/if}
-        {#each ticket.deps as d}
-          {@const dep = workspace.get(d)}
-          <span class="dep" class:unmet={dep && dep.status !== 'done'}>dep: <a class="mono" href={`/tickets/${d}`}>{d}</a>{#if dep} <em>({dep.status})</em>{/if}</span>
-        {/each}
-        {#if ticket.blocked}<span class="blocked">🔒 blocked</span>{/if}
-      </div>
-    {/if}
-
+    <TicketGraph {ticket} />
     {#if ticket.epicProgress}
-      <div class="epic">
-        <strong>Children</strong> ({ticket.epicProgress.done}/{ticket.epicProgress.total} done)
-        {#each ticket.children ?? [] as c}
-          <a class="child" href={`/tickets/${c.id}`}><span class="mono">{c.id}</span> <span class="cstatus">[{c.status}]</span> {c.title}</a>
-        {/each}
-      </div>
+      <p class="epic-summary">Children ({ticket.epicProgress.done}/{ticket.epicProgress.total} done)</p>
     {/if}
 
     {#if conflict}
@@ -251,7 +265,7 @@
         <textarea bind:value={text} oninput={onEdit} spellcheck="false"></textarea>
       {/if}
       {#if mode !== 'edit' || readOnly}
-        <div class="preview">{@html preview}</div>
+        <div class="preview" onchange={onChecklistChange}>{@html readOnly || dirty ? preview.replaceAll('<input ', '<input disabled ') : preview}</div>
       {/if}
     </div>
 
@@ -311,14 +325,7 @@
   .chip button { background: none; border: none; color: inherit; }
   .labels input { width: 80px; background: none; border: 1px dashed var(--color-border); border-radius: 6px; padding: 2px 6px; font-size: 11px; }
   .updated { margin-left: auto; color: var(--color-dim); font-size: 11px; }
-  .rels { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--color-dim); margin-bottom: 10px; }
-  .rels a { color: var(--color-accent); text-decoration: none; }
-  .dep.unmet { color: var(--color-warn); }
-  .blocked { color: var(--color-danger); }
-  .epic { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
-  .epic strong { font-size: 12px; }
-  .child { display: block; margin-top: 4px; text-decoration: none; color: inherit; }
-  .cstatus { color: var(--color-dim); font-size: 11px; }
+  .epic-summary { font-size: 12px; color: var(--color-dim); margin: -4px 0 12px; }
   .conflict { background: color-mix(in srgb, var(--color-warn) 12%, var(--color-surface)); border: 1px solid var(--color-warn); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
   .conflict button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
   .editor-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }

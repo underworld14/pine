@@ -1,7 +1,9 @@
 import MarkdownIt from 'markdown-it';
+import taskLists from 'markdown-it-task-lists';
 import DOMPurify from 'dompurify';
 
-const md = new MarkdownIt({ html: true, linkify: true, breaks: false });
+const md = new MarkdownIt({ html: true, linkify: true, breaks: false })
+  .use(taskLists, { enabled: true, label: false });
 
 // Rewrite relative attachment paths (portable on disk) to the served URL, and
 // force links to open safely.
@@ -27,7 +29,7 @@ export function renderMarkdown(source: string): string {
   return DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['style', 'form', 'script', 'iframe'],
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'checked'],
     ALLOW_DATA_ATTR: false
   });
 }

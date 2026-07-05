@@ -73,6 +73,7 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 			if ex := excerpt(t.Body); ex != "" {
 				fmt.Fprintf(&b, "> %s\n", ex)
 			}
+			writeAcceptanceBlock(&b, t.Body)
 			b.WriteString("\n")
 		}
 	}
@@ -103,6 +104,31 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 		b.WriteString("## Open Tickets\n")
 		writeTable(&b, open)
 		b.WriteString("\n")
+	}
+
+	// Acceptance criteria for open tickets not already detailed in crit/high.
+	critHighIDs := make(map[string]bool, len(critHigh))
+	for _, t := range critHigh {
+		critHighIDs[t.ID] = true
+	}
+	var acOpen []*ticket.Ticket
+	for _, t := range all {
+		if t.Status == ticket.StatusDone || critHighIDs[t.ID] {
+			continue
+		}
+		if _, total := ticket.AcceptanceProgress(t.Body); total > 0 {
+			acOpen = append(acOpen, t)
+		}
+	}
+	s.SortByPriorityThenUpdated(acOpen)
+	if len(acOpen) > 0 {
+		b.WriteString("## Acceptance Criteria Progress\n")
+		for _, t := range acOpen {
+			done, total := ticket.AcceptanceProgress(t.Body)
+			fmt.Fprintf(&b, "### %s · %s (%d/%d)\n", t.ID, t.Title, done, total)
+			writeAcceptanceBlock(&b, t.Body)
+			b.WriteString("\n")
+		}
 	}
 
 	// In testing.
@@ -169,6 +195,19 @@ func writeTable(b *strings.Builder, ts []*ticket.Ticket) {
 		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
 			t.ID, mdEscape(t.Title), t.Status, t.Priority, strings.Join(t.Labels, ", "))
 	}
+}
+
+// writeAcceptanceBlock appends the AC section and checkbox progress when present.
+func writeAcceptanceBlock(b *strings.Builder, body string) {
+	ac, ok := ticket.SectionContent(body, "Acceptance Criteria")
+	if !ok {
+		return
+	}
+	done, total := ticket.AcceptanceProgress(body)
+	if total == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n## Acceptance Criteria (%d/%d)\n%s\n", done, total, ac)
 }
 
 // excerpt returns the first non-empty line of the Description section (or the

@@ -36,6 +36,12 @@
   <div class="foot">
     {#if ticket.attachments?.length}<span>📎 {ticket.attachments.length}</span>{/if}
     {#if ticket.parent}<span class="mono parent">{ticket.parent}</span>{/if}
+    {#if ticket.acceptance?.total}
+      <span class="ac" title="Acceptance criteria">
+        {#each Array(ticket.acceptance.total) as _, i}<span class="tick" class:on={i < ticket.acceptance.done}></span>{/each}
+        {ticket.acceptance.done}/{ticket.acceptance.total}
+      </span>
+    {/if}
     <span class="spacer"></span>
     <span class="time">{relTime(ticket.updated)}</span>
   </div>
@@ -74,5 +80,8 @@
   .more { font-size: 10px; color: var(--color-dim); }
   .title { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--color-dim); }
+  .ac { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--color-dim); }
+  .ac .tick { width: 5px; height: 5px; border-radius: 1px; background: var(--color-border); }
+  .ac .tick.on { background: var(--color-accent); }
   .parent { font-size: 10px; }
 </style>
