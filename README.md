@@ -56,7 +56,7 @@ small placeholder page in place of the UI.)
 
 ### Build from source
 
-Requires **Go 1.24+** and **Node 20+**.
+Requires **Go 1.26+** and **Node 20+**.
 
 ```sh
 git clone https://github.com/underworld14/pine

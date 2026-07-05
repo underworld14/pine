@@ -327,4 +327,7 @@ func TestAttachmentPathTraversalNeutralized(t *testing.T) {
 	if _, err := s.AttachmentFilePath("bad-id", "ok.png"); err == nil {
 		t.Errorf("invalid ticket id should be rejected")
 	}
+	if err := s.DeleteAttachment("..", "config.yaml"); err == nil {
+		t.Errorf("DeleteAttachment with invalid id should be rejected")
+	}
 }

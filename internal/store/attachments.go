@@ -77,6 +77,9 @@ func (s *Store) WriteAttachment(id, name string, data []byte) (AttachmentInfo, e
 
 // DeleteAttachment removes one file from a ticket's attachment directory.
 func (s *Store) DeleteAttachment(id, name string) error {
+	if !ticket.ValidID(id) {
+		return errors.New("invalid ticket id")
+	}
 	safe, err := sanitizeName(name)
 	if err != nil {
 		return err

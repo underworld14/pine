@@ -40,7 +40,7 @@ jobs:
           echo "PINE_BIN=$OUT" >> "$GITHUB_ENV"
 
       - name: Install extension dependencies
-        run: npm install
+        run: npm ci
         working-directory: editors/vscode
 
       - name: Typecheck

@@ -11,7 +11,7 @@ welcome — bug reports, features, docs, and tests.
 
 ## Development setup
 
-Requirements: **Go 1.24+** and **Node 20+**.
+Requirements: **Go 1.26+** and **Node 20+**.
 
 ```sh
 git clone https://github.com/underworld14/pine

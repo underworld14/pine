@@ -11,28 +11,33 @@
 
   // Local view of columns so drag operations feel instant; reconciled from the store.
   let cols = $state<{ status: string; title: string; items: Ticket[] }[]>([]);
+  let dragging = $state(false);
   $effect(() => {
+    if (dragging) return;
     cols = workspace.columns.map((c) => ({ status: c.status, title: c.title, items: [...c.tickets] }));
   });
 
   function handleConsider(ci: number, e: CustomEvent) {
+    dragging = true;
     cols[ci].items = e.detail.items;
   }
   async function handleFinalize(ci: number, e: CustomEvent) {
     const status = cols[ci].status;
     cols[ci].items = e.detail.items;
-    const moved: Ticket | undefined = e.detail.info?.id ? workspace.get(e.detail.info.id) : undefined;
-    const info = e.detail.info;
-    // Determine which ticket landed in this column with a different status.
-    for (const t of e.detail.items as Ticket[]) {
-      if (t.status !== status) {
-        try {
-          await workspace.move(t.id, status);
-        } catch (err) {
-          toasts.push(`Couldn't move ${t.id} — reverted`, 'error');
+    try {
+      // Determine which ticket landed in this column with a different status.
+      for (const t of e.detail.items as Ticket[]) {
+        if (t.status !== status) {
+          try {
+            await workspace.move(t.id, status);
+          } catch (err) {
+            toasts.push(`Couldn't move ${t.id} — reverted`, 'error');
+          }
+          break;
         }
-        break;
       }
+    } finally {
+      dragging = false;
     }
   }
 </script>

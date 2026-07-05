@@ -28,9 +28,7 @@ func (srv *Server) StartLiveSync() func() {
 				if !ok {
 					return
 				}
-				for _, ev := range batch {
-					srv.applyWatchEvent(ev)
-				}
+				srv.applyWatchBatch(batch)
 			}
 		}
 	}()
@@ -40,38 +38,54 @@ func (srv *Server) StartLiveSync() func() {
 	}
 }
 
+// applyWatchBatch reconciles a watcher batch and broadcasts changes. Ticket
+// updates share one dependency-graph build per batch instead of one per event.
+func (srv *Server) applyWatchBatch(batch []watch.Event) {
+	var updatedIDs []string
+	for _, ev := range batch {
+		switch ev.Kind {
+		case watch.KindTicket:
+			ch, err := srv.store.ReloadTicket(ev.Path)
+			if err != nil {
+				continue
+			}
+			if ch.Removed {
+				srv.deindex(ch.ID)
+				srv.emit("ticket.deleted", fsOrigin(), map[string]any{"id": ch.ID})
+				continue
+			}
+			if ch.Changed {
+				srv.reindex(ch.ID)
+				updatedIDs = append(updatedIDs, ch.ID)
+			}
+		case watch.KindConfig:
+			if changed, _ := srv.store.ReloadConfig(); changed {
+				srv.emit("config.updated", fsOrigin(), map[string]any{"config": srv.store.Config()})
+			}
+		case watch.KindBoard:
+			if changed, _ := srv.store.ReloadBoard(); changed {
+				srv.emit("board.updated", fsOrigin(), map[string]any{"board": srv.buildBoard()})
+			}
+		}
+	}
+	if len(updatedIDs) == 0 {
+		return
+	}
+	g := srv.store.Graph()
+	for _, id := range updatedIDs {
+		t, err := srv.store.Get(id)
+		if err != nil {
+			continue
+		}
+		srv.emit("ticket.updated", fsOrigin(), map[string]any{
+			"ticket": view.Build(srv.store, g, t, true),
+		})
+	}
+}
+
 // applyWatchEvent reconciles one external change and broadcasts it. Store reloads
 // dedupe by content hash, so the server's own writes (already reflected in the
 // cache) produce no duplicate event here — the API handler emits those.
 func (srv *Server) applyWatchEvent(ev watch.Event) {
-	switch ev.Kind {
-	case watch.KindTicket:
-		ch, err := srv.store.ReloadTicket(ev.Path)
-		if err != nil {
-			return
-		}
-		if ch.Removed {
-			srv.deindex(ch.ID)
-			srv.emit("ticket.deleted", fsOrigin(), map[string]any{"id": ch.ID})
-			return
-		}
-		if ch.Changed {
-			t, err := srv.store.Get(ch.ID)
-			if err != nil {
-				return
-			}
-			srv.reindex(ch.ID)
-			srv.emit("ticket.updated", fsOrigin(), map[string]any{
-				"ticket": view.Build(srv.store, srv.store.Graph(), t, true),
-			})
-		}
-	case watch.KindConfig:
-		if changed, _ := srv.store.ReloadConfig(); changed {
-			srv.emit("config.updated", fsOrigin(), map[string]any{"config": srv.store.Config()})
-		}
-	case watch.KindBoard:
-		if changed, _ := srv.store.ReloadBoard(); changed {
-			srv.emit("board.updated", fsOrigin(), map[string]any{"board": srv.buildBoard()})
-		}
-	}
+	srv.applyWatchBatch([]watch.Event{ev})
 }

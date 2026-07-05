@@ -7,6 +7,7 @@
   import { renderMarkdown } from '$lib/markdown';
   import { priorityMeta, labelColor } from '$lib/ui-helpers';
   import { relTime, bytes } from '$lib/format';
+  import { reconcileEditor } from '$lib/ticket-editor';
 
   const id = $derived($page.params.id);
   const ticket = $derived(workspace.get(id));
@@ -30,17 +31,11 @@
       return;
     }
     if (t.hash !== baseHash) {
-      // Disk changed under us. If the editor is clean (unchanged from our base),
-      // adopt the new version silently — the "an agent rewrote it while I watched"
-      // moment. If the editor is dirty, flag a conflict instead of clobbering.
-      if (text === baseBody) {
-        text = t.body ?? '';
-        baseBody = t.body ?? '';
-        baseHash = t.hash;
-        conflict = null;
-      } else {
-        conflict = t;
-      }
+      const r = reconcileEditor({ text, baseBody, baseHash, ticket: t });
+      text = r.text;
+      baseBody = r.baseBody;
+      baseHash = r.baseHash;
+      conflict = r.conflict;
     }
   });
 
