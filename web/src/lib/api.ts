@@ -37,6 +37,12 @@ export interface Ticket {
   degraded?: boolean;
   body?: string;
   attachments: Attachment[];
+  // Cross-branch provenance. source is 'local' for the checked-out working tree
+  // or 'local-branch' for a ticket read from another git branch. branch names
+  // that branch; readOnly marks a ticket that cannot be edited from here.
+  source?: string;
+  branch?: string;
+  readOnly?: boolean;
 }
 
 export interface Column {
@@ -104,6 +110,7 @@ export interface PineEvent {
   seq: number;
   origin: { source: 'api' | 'fs'; opId?: string };
   ticket?: Ticket;
+  tickets?: Ticket[]; // crossbranch.updated carries the full off-branch set
   id?: string;
   board?: Board;
   config?: Config;
@@ -183,7 +190,7 @@ export class PineEventSource {
   private closed = false;
   private readonly types = [
     'ticket.created', 'ticket.updated', 'ticket.deleted',
-    'board.updated', 'config.updated', 'git.updated'
+    'board.updated', 'config.updated', 'git.updated', 'crossbranch.updated'
   ];
 
   constructor(

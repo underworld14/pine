@@ -90,3 +90,113 @@ func TestNotARepo(t *testing.T) {
 		t.Errorf("snapshot should report not-a-repo")
 	}
 }
+
+func writeFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	full := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBranchesListTreeAndShow(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, ".pine/tickets/BUG-0a1b2c.md", "on main\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "main ticket")
+
+	run(t, dir, "checkout", "-q", "-b", "feature")
+	writeFile(t, dir, ".pine/tickets/FEAT-3d4e5f.md", "on feature\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "feature ticket")
+	run(t, dir, "checkout", "-q", "main") // feature is now an OFF branch
+
+	c := New(dir)
+	ctx := context.Background()
+
+	branches := c.Branches(ctx)
+	byName := map[string]Branch{}
+	for _, b := range branches {
+		byName[b.Name] = b
+	}
+	if _, ok := byName["main"]; !ok {
+		t.Fatalf("main branch missing: %+v", branches)
+	}
+	feat, ok := byName["feature"]
+	if !ok {
+		t.Fatalf("feature branch missing: %+v", branches)
+	}
+	if feat.SHA == "" || feat.CommitDate.IsZero() {
+		t.Errorf("feature branch not fully populated: %+v", feat)
+	}
+
+	// ls-tree the OFF branch's tickets dir via its pinned SHA (no checkout).
+	files := c.ListTreeFiles(ctx, feat.SHA, ".pine/tickets")
+	if len(files) != 2 { // both BUG (from main, inherited) and FEAT exist on feature
+		t.Errorf("feature tree files = %v", files)
+	}
+	foundFeat := false
+	for _, f := range files {
+		if f == ".pine/tickets/FEAT-3d4e5f.md" {
+			foundFeat = true
+		}
+	}
+	if !foundFeat {
+		t.Errorf("FEAT ticket not found in feature tree: %v", files)
+	}
+
+	// show a file that only exists on the off branch.
+	content, ok := c.ShowFile(ctx, feat.SHA, ".pine/tickets/FEAT-3d4e5f.md")
+	if !ok || string(content) != "on feature\n" {
+		t.Errorf("ShowFile feature = %q ok=%v", content, ok)
+	}
+	// missing file → ok=false.
+	if _, ok := c.ShowFile(ctx, feat.SHA, ".pine/tickets/NOPE-000000.md"); ok {
+		t.Errorf("ShowFile of missing file should return ok=false")
+	}
+}
+
+func TestShowFileSHAPinIsImmuneToBranchMovement(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, ".pine/tickets/BUG-0a1b2c.md", "v1\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "v1")
+
+	c := New(dir)
+	ctx := context.Background()
+	pinned := c.Branches(ctx)[0].SHA
+
+	// Move the branch forward: change the same file and commit.
+	writeFile(t, dir, ".pine/tickets/BUG-0a1b2c.md", "v2\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "v2")
+
+	// Reading via the PINNED sha still returns the old content.
+	content, ok := c.ShowFile(ctx, pinned, ".pine/tickets/BUG-0a1b2c.md")
+	if !ok || string(content) != "v1\n" {
+		t.Errorf("pinned ShowFile = %q ok=%v, want v1", content, ok)
+	}
+}
+
+func TestBranchesNotARepo(t *testing.T) {
+	gitAvailable(t)
+	c := New(t.TempDir())
+	if b := c.Branches(context.Background()); len(b) != 0 {
+		t.Errorf("Branches on non-repo = %v", b)
+	}
+	if f := c.ListTreeFiles(context.Background(), "HEAD", "."); len(f) != 0 {
+		t.Errorf("ListTreeFiles on non-repo = %v", f)
+	}
+	if _, ok := c.ShowFile(context.Background(), "HEAD", "x"); ok {
+		t.Errorf("ShowFile on non-repo should be ok=false")
+	}
+}

@@ -13,6 +13,7 @@ import (
 func (srv *Server) StartLiveSync() func() {
 	done := make(chan struct{})
 	srv.startGitPoller(done)
+	srv.startCrossBranchPoller(done)
 
 	w, err := watch.New(srv.store.Root())
 	if err != nil {
@@ -51,6 +52,7 @@ func (srv *Server) applyWatchBatch(batch []watch.Event) {
 			}
 			if ch.Removed {
 				srv.deindex(ch.ID)
+				srv.kickCrossBranch() // a removed local id may now surface from a branch
 				srv.emit("ticket.deleted", fsOrigin(), map[string]any{"id": ch.ID})
 				continue
 			}
@@ -60,6 +62,7 @@ func (srv *Server) applyWatchBatch(batch []watch.Event) {
 			}
 		case watch.KindConfig:
 			if changed, _ := srv.store.ReloadConfig(); changed {
+				srv.kickCrossBranch() // crossBranch.enabled / idStyle may have changed
 				srv.emit("config.updated", fsOrigin(), map[string]any{"config": srv.store.Config()})
 			}
 		case watch.KindBoard:

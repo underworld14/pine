@@ -34,6 +34,10 @@ type attachResult struct {
 
 func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if branch, ok := srv.offBranchRef(id); ok {
+		writeErr(w, readOnlyBranch(id, branch))
+		return
+	}
 	if _, err := srv.store.Get(id); err != nil {
 		writeErr(w, err)
 		return
@@ -130,6 +134,10 @@ func buildAttachResult(id string, p attach.Processed, dedup bool) attachResult {
 func (srv *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	name := chi.URLParam(r, "name")
+	if branch, ok := srv.offBranchRef(id); ok {
+		writeErr(w, readOnlyBranch(id, branch))
+		return
+	}
 	if err := srv.store.DeleteAttachment(id, name); err != nil {
 		writeErr(w, badRequest(err.Error()))
 		return

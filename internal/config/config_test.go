@@ -106,6 +106,57 @@ func TestIDStyleDefaultAndValidation(t *testing.T) {
 	}
 }
 
+func TestCrossBranchDefaultsAndRoundTrip(t *testing.T) {
+	c := Default("x")
+	if !c.CrossBranch.Enabled || c.CrossBranch.ActiveBranchDays != 30 {
+		t.Errorf("default crossBranch = %+v, want {true 30}", c.CrossBranch)
+	}
+	out, err := c.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"crossBranch"`) || !strings.Contains(string(out), `"activeBranchDays"`) {
+		t.Errorf("crossBranch not serialized:\n%s", out)
+	}
+
+	// Backward-compat: a config predating the feature (no crossBranch key)
+	// inherits the enabled-by-default value.
+	old, err := Parse([]byte(`{"version":1,"project":{"name":"x"},"types":[{"prefix":"BUG","name":"Bug"}],"priorities":["low"],"idStyle":"hash"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.CrossBranch.Enabled || old.CrossBranch.ActiveBranchDays != 30 {
+		t.Errorf("legacy config crossBranch = %+v, want {true 30}", old.CrossBranch)
+	}
+
+	// A partial crossBranch object keeps unspecified fields at their default.
+	partial, err := Parse([]byte(`{"crossBranch":{"enabled":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.CrossBranch.Enabled {
+		t.Errorf("enabled should be false")
+	}
+	if partial.CrossBranch.ActiveBranchDays != 30 {
+		t.Errorf("activeBranchDays should stay 30, got %d", partial.CrossBranch.ActiveBranchDays)
+	}
+}
+
+func TestCrossBranchValidation(t *testing.T) {
+	c := Default("x")
+	c.CrossBranch.ActiveBranchDays = 0
+	if len(c.Validate()) == 0 {
+		t.Errorf("activeBranchDays=0 should be flagged")
+	}
+	// enabled + sequential is NOT a hard validation error (doctor warns instead).
+	seq := Default("x")
+	seq.IDStyle = "sequential"
+	seq.CrossBranch.Enabled = true
+	if problems := seq.Validate(); len(problems) != 0 {
+		t.Errorf("enabled+sequential should not be a hard error: %v", problems)
+	}
+}
+
 func TestConfigValidateCatchesProblems(t *testing.T) {
 	c := Default("x")
 	c.Git.Backend = "svn"

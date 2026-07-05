@@ -25,6 +25,7 @@ func (srv *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	for _, t := range ts {
 		out = append(out, view.Build(srv.store, g, t, false))
 	}
+	out = srv.appendOverlay(out, &f)
 	writeJSON(w, http.StatusOK, map[string]any{"tickets": out})
 }
 
@@ -64,6 +65,7 @@ func (srv *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	srv.setETag(w, t.ID)
 	srv.reindex(t.ID)
+	srv.kickCrossBranch() // a new local id may shadow an off-branch copy
 	v := view.Build(srv.store, srv.store.Graph(), t, true)
 	srv.emit("ticket.created", apiOrigin(b.OpID), map[string]any{"ticket": v})
 	writeJSON(w, http.StatusCreated, v)
@@ -94,6 +96,10 @@ type ticketPatch struct {
 
 func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if branch, ok := srv.offBranchRef(id); ok {
+		writeErr(w, readOnlyBranch(id, branch))
+		return
+	}
 	var p ticketPatch
 	if err := decodeJSON(r, &p); err != nil {
 		writeErr(w, badRequest(err.Error()))
@@ -147,11 +153,16 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleDeleteTicket(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if branch, ok := srv.offBranchRef(id); ok {
+		writeErr(w, readOnlyBranch(id, branch))
+		return
+	}
 	if err := srv.store.Delete(id); err != nil {
 		writeErr(w, err)
 		return
 	}
 	srv.deindex(id)
+	srv.kickCrossBranch() // a removed local id may now surface from a branch
 	srv.emit("ticket.deleted", apiOrigin(r.URL.Query().Get("opId")), map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -11,6 +11,9 @@
 
   const id = $derived($page.params.id);
   const ticket = $derived(workspace.get(id));
+  // Off-branch tickets are read-only: every mutation is gated below and the
+  // server would 409 anyway. The editor stays in preview.
+  const readOnly = $derived(!!ticket?.readOnly);
 
   let mode = $state<'preview' | 'split' | 'edit'>('preview');
   let text = $state('');
@@ -54,7 +57,7 @@
   const preview = $derived(renderMarkdown(mode === 'edit' ? '' : text));
 
   async function save(force = false) {
-    if (!ticket) return;
+    if (!ticket || readOnly) return;
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     // A normal save uses baseHash — the version the editor content is based on —
     // NOT ticket.hash (which the SSE stream may have already advanced to the disk
@@ -80,11 +83,13 @@
   }
 
   function onEdit() {
+    if (readOnly) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { if (dirty) save(); }, 2000);
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (readOnly) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); mode = mode === 'edit' ? 'preview' : mode === 'preview' ? 'split' : 'edit'; }
   }
@@ -99,6 +104,7 @@
   }
 
   async function setField(patch: Record<string, unknown>) {
+    if (readOnly) return;
     try { await workspace.patch(id, patch); } catch (e) { toasts.push('Update failed', 'error'); }
   }
 
@@ -109,6 +115,7 @@
   }
 
   async function del() {
+    if (readOnly) return;
     if (!confirm(`Delete ${id}?`)) return;
     await workspace.remove(id);
     goto('/board');
@@ -117,17 +124,17 @@
   let labelInput = $state('');
   async function addLabel() {
     const l = labelInput.trim();
-    if (!l || !ticket) return;
+    if (!l || !ticket || readOnly) return;
     await setField({ labels: [...ticket.labels, l] });
     labelInput = '';
   }
   async function removeLabel(l: string) {
-    if (!ticket) return;
+    if (!ticket || readOnly) return;
     await setField({ labels: ticket.labels.filter((x) => x !== l) });
   }
 
   async function uploadFiles(files: File[]) {
-    if (!files.length) return;
+    if (!files.length || readOnly) return;
     try {
       const results = await api.upload(id, files, { opId: workspace.beginOp() });
       const ok = results.filter((r) => !r.error);
@@ -161,27 +168,41 @@
     <div class="bar">
       <a href="/board" class="back">←</a>
       <button class="mono id" onclick={() => navigator.clipboard.writeText(ticket.id)} title="Copy id">{ticket.id}</button>
-      <input class="title" value={ticket.title} onblur={(e) => setField({ title: (e.target as HTMLInputElement).value })} />
+      <input class="title" value={ticket.title} readonly={readOnly} onblur={(e) => setField({ title: (e.target as HTMLInputElement).value })} />
       <span class="spacer"></span>
-      <button class="ghost" onclick={copyPrompt}>Copy AI prompt</button>
-      <button class="ghost danger" onclick={del}>Delete</button>
+      {#if !readOnly}
+        <button class="ghost" onclick={copyPrompt}>Copy AI prompt</button>
+        <button class="ghost danger" onclick={del}>Delete</button>
+      {/if}
     </div>
 
+    {#if readOnly}
+      <div class="ro-banner">
+        <span class="ro-badge">⑂ {ticket.branch}</span>
+        Read-only — this ticket lives on branch <strong>{ticket.branch}</strong>. Check out that branch to edit it.
+        {#if ticket.branch}
+          <button class="ro-copy" onclick={() => navigator.clipboard.writeText(ticket.branch ?? '')} title="Copy branch name">copy</button>
+        {/if}
+      </div>
+    {/if}
+
     <div class="meta">
-      <select value={ticket.status} onchange={(e) => setField({ status: (e.target as HTMLSelectElement).value })}>
+      <select value={ticket.status} disabled={readOnly} onchange={(e) => setField({ status: (e.target as HTMLSelectElement).value })}>
         {#each workspace.board?.columns ?? [] as c}<option value={c.status}>{c.title}</option>{/each}
         {#if !(workspace.board?.columns ?? []).some((c) => c.status === ticket.status)}<option value={ticket.status}>{ticket.status}</option>{/if}
       </select>
       <div class="seg">
         {#each ['low', 'medium', 'high', 'critical'] as p}
-          <button class:active={ticket.priority === p} style="--c: {priorityMeta(p).color}" onclick={() => setField({ priority: p })} title={p}>{priorityMeta(p).glyph}</button>
+          <button class:active={ticket.priority === p} disabled={readOnly} style="--c: {priorityMeta(p).color}" onclick={() => setField({ priority: p })} title={p}>{priorityMeta(p).glyph}</button>
         {/each}
       </div>
       <div class="labels">
         {#each ticket.labels as l}
-          <span class="chip" style="--c: {labelColor(l)}">{l}<button onclick={() => removeLabel(l)}>×</button></span>
+          <span class="chip" style="--c: {labelColor(l)}">{l}{#if !readOnly}<button onclick={() => removeLabel(l)}>×</button>{/if}</span>
         {/each}
-        <input bind:value={labelInput} placeholder="+ label" onkeydown={(e) => { if (e.key === 'Enter') addLabel(); }} />
+        {#if !readOnly}
+          <input bind:value={labelInput} placeholder="+ label" onkeydown={(e) => { if (e.key === 'Enter') addLabel(); }} />
+        {/if}
       </div>
       <span class="updated">updated {relTime(ticket.updated)}</span>
     </div>
@@ -215,19 +236,21 @@
     {/if}
 
     <div class="editor-head">
-      <div class="modes">
-        {#each ['preview', 'split', 'edit'] as m}
-          <button class:active={mode === m} onclick={() => (mode = m as typeof mode)}>{m}</button>
-        {/each}
-      </div>
-      {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
+      {#if !readOnly}
+        <div class="modes">
+          {#each ['preview', 'split', 'edit'] as m}
+            <button class:active={mode === m} onclick={() => (mode = m as typeof mode)}>{m}</button>
+          {/each}
+        </div>
+        {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
+      {/if}
     </div>
 
-    <div class="editor" class:split={mode === 'split'}>
-      {#if mode !== 'preview'}
+    <div class="editor" class:split={mode === 'split' && !readOnly}>
+      {#if mode !== 'preview' && !readOnly}
         <textarea bind:value={text} oninput={onEdit} spellcheck="false"></textarea>
       {/if}
-      {#if mode !== 'edit'}
+      {#if mode !== 'edit' || readOnly}
         <div class="preview">{@html preview}</div>
       {/if}
     </div>
@@ -268,6 +291,16 @@
   .spacer { flex: 0; }
   .ghost { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 10px; font-size: 12px; }
   .ghost.danger { color: var(--color-danger); }
+  .ro-banner {
+    display: flex; align-items: center; gap: 10px; margin: 12px 0;
+    padding: 8px 12px; font-size: 13px; border-radius: 8px;
+    background: color-mix(in srgb, var(--color-dim) 10%, var(--color-surface));
+    border: 1px dashed var(--color-border); color: var(--color-dim);
+  }
+  .ro-badge { font-family: var(--font-mono); font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--color-surface-2); color: var(--color-dim); white-space: nowrap; }
+  .ro-copy { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 2px 8px; font-size: 11px; margin-left: auto; }
+  .title[readonly] { border-color: transparent; opacity: 0.85; }
+  select:disabled, .seg button:disabled { opacity: 0.6; }
   .meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
   select { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
   .seg { display: flex; border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; }

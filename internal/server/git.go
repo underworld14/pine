@@ -57,6 +57,7 @@ func (srv *Server) startGitPoller(done chan struct{}) {
 				if h := hashStatus(s); h != prev {
 					prev = h
 					srv.setGitStatus(s)
+					srv.kickCrossBranch() // HEAD/branch may have moved; refresh the overlay
 					srv.emit("git.updated", fsOrigin(), map[string]any{"git": s})
 				}
 			}

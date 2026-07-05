@@ -8,6 +8,11 @@ export function priorityMeta(p: string): { label: string; color: string; glyph: 
   }
 }
 
+// shortBranch trims a display branch name (drops any leading "origin/").
+export function shortBranch(branch: string): string {
+  return branch.replace(/^origin\//, '');
+}
+
 // Deterministic label hue from a fixed 8-color palette.
 const HUES = [200, 150, 45, 280, 340, 20, 100, 250];
 export function labelColor(label: string): string {

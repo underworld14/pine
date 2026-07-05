@@ -17,6 +17,12 @@ function uuid(): string {
   return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
 }
 
+// readOnlyMessage explains why an off-branch ticket cannot be edited from here.
+export function readOnlyMessage(t: Ticket): string {
+  const where = t.branch ? `branch "${t.branch}"` : 'another branch';
+  return `${t.id} lives on ${where} and is read-only here. Check out that branch to edit it.`;
+}
+
 const PRIORITY_RANK: Record<string, number> = { critical: 3, high: 2, medium: 1, low: 0 };
 
 class WorkspaceStore {
@@ -156,6 +162,19 @@ class WorkspaceStore {
       case 'git.updated':
         if (ev.git) this.git = ev.git;
         break;
+      case 'crossbranch.updated': {
+        // Replace the off-branch subset wholesale: keep every local (editable)
+        // ticket, then add the fresh off-branch set (local always wins on id).
+        const next: Record<string, Ticket> = {};
+        for (const [id, t] of Object.entries(this.tickets)) {
+          if (!t.readOnly) next[id] = t;
+        }
+        for (const t of ev.tickets ?? []) {
+          if (!next[t.id]) next[t.id] = t;
+        }
+        this.tickets = next;
+        break;
+      }
     }
   }
 
@@ -170,7 +189,8 @@ class WorkspaceStore {
   // Optimistic status move (drag & drop). Reverts on failure.
   async move(id: string, toStatus: string) {
     const before = this.tickets[id];
-    if (!before || before.status === toStatus) return;
+    // Off-branch tickets are read-only: never attempt a move the server will 409.
+    if (!before || before.status === toStatus || before.readOnly) return;
     const opId = this.trackOp();
     this.tickets = { ...this.tickets, [id]: { ...before, status: toStatus } };
     try {
@@ -189,8 +209,9 @@ class WorkspaceStore {
   }
 
   async patch(id: string, patch: Record<string, unknown>): Promise<Ticket> {
-    const opId = this.trackOp();
     const cur = this.tickets[id];
+    if (cur?.readOnly) throw new Error(readOnlyMessage(cur));
+    const opId = this.trackOp();
     const updated = await api.patchTicket(id, { ...patch, opId }, cur?.hash);
     this.tickets = { ...this.tickets, [id]: updated };
     return updated;
@@ -204,6 +225,8 @@ class WorkspaceStore {
   }
 
   async remove(id: string) {
+    const cur = this.tickets[id];
+    if (cur?.readOnly) throw new Error(readOnlyMessage(cur));
     const opId = this.trackOp();
     await api.deleteTicket(id, opId);
     const { [id]: _, ...rest } = this.tickets;

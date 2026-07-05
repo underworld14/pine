@@ -68,6 +68,11 @@ func Run(s *store.Store) *Report {
 		r.ok("config.json and board.json are valid")
 	}
 
+	if cfg.CrossBranch.Enabled && cfg.IDStyle != "hash" {
+		r.warn("crossBranch is enabled but idStyle is \"" + cfg.IDStyle +
+			"\" — cross-branch aggregation is disabled because sequential IDs collide across branches")
+	}
+
 	all := s.All()
 	byID := map[string]*ticket.Ticket{}
 	for _, t := range all {

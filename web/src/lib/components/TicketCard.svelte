@@ -1,18 +1,20 @@
 <script lang="ts">
   import type { Ticket } from '$lib/api';
   import { workspace } from '$lib/workspace.svelte';
-  import { priorityMeta, labelColor } from '$lib/ui-helpers';
+  import { priorityMeta, labelColor, shortBranch } from '$lib/ui-helpers';
   import { relTime } from '$lib/format';
 
   let { ticket }: { ticket: Ticket } = $props();
   const pm = $derived(priorityMeta(ticket.priority));
   const flash = $derived(workspace.flashing[ticket.id] ?? 0);
+  const offBranch = $derived(!!ticket.readOnly);
 </script>
 
 <a
   href={`/tickets/${ticket.id}`}
   class="card"
   class:flash={flash > 0}
+  class:readonly={offBranch}
   data-flash={flash}
 >
   <div class="row">
@@ -22,6 +24,9 @@
       <span class="lock" title="Blocked by {ticket.unmet?.length ?? ''} unmet dependencies">🔒</span>
     {/if}
     <span class="spacer"></span>
+    {#if offBranch && ticket.branch}
+      <span class="branch" title="Read-only — lives on branch {ticket.branch}">⑂ {shortBranch(ticket.branch)}</span>
+    {/if}
     {#each ticket.labels.slice(0, 2) as l}
       <span class="chip" style="--c: {labelColor(l)}">{l}</span>
     {/each}
@@ -48,6 +53,14 @@
     transition: border-color 0.14s, transform 0.14s;
   }
   .card:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border)); }
+  /* Off-branch (read-only) cards read as non-editable: dimmed with a dashed edge. */
+  .card.readonly { border-style: dashed; opacity: 0.72; }
+  .card.readonly:hover { opacity: 0.9; }
+  .branch {
+    font-size: 10px; padding: 1px 6px; border-radius: 999px; white-space: nowrap;
+    background: color-mix(in srgb, var(--color-dim) 18%, transparent);
+    color: var(--color-dim);
+  }
   .row { display: flex; align-items: center; gap: 6px; }
   .prio { font-size: 10px; }
   .id { font-size: 11px; color: var(--color-dim); }

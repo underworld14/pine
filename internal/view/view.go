@@ -36,6 +36,14 @@ type Ticket struct {
 	Degraded    bool                   `json:"degraded,omitempty"`
 	Body        string                 `json:"body,omitempty"`
 	Attachments []store.AttachmentInfo `json:"attachments"`
+
+	// Cross-branch provenance. Source is "local" for the checked-out working
+	// tree (editable) or "local-branch" for a ticket read from another branch.
+	// Branch names the source branch for off-branch tickets; ReadOnly marks a
+	// ticket that cannot be edited from the current checkout.
+	Source   string `json:"source,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	ReadOnly bool   `json:"readOnly,omitempty"`
 }
 
 // ChildRef is a lightweight reference to an epic's child ticket.
@@ -72,6 +80,7 @@ func Build(s *store.Store, g *ticket.Graph, t *ticket.Ticket, includeBody bool) 
 		InCycle:     info.InCycle,
 		Degraded:    t.Degraded,
 		Attachments: attachmentsOrEmpty(s.Attachments(t.ID)),
+		Source:      "local",
 	}
 	if h, ok := s.Hash(t.ID); ok {
 		v.Hash = h
@@ -85,6 +94,34 @@ func Build(s *store.Store, g *ticket.Graph, t *ticket.Ticket, includeBody bool) 
 		}
 		done, total := g.EpicProgress(t.ID)
 		v.EpicProgress = &Progress{Done: done, Total: total}
+	}
+	return v
+}
+
+// BuildOffBranch assembles a read-only view for a ticket that lives on another
+// git branch, not the checked-out working tree. It needs no store or graph: an
+// off-branch ticket carries no dependency state, epic children, attachments, or
+// content hash in v1 — it is a read-only card badged with its source branch.
+func BuildOffBranch(t *ticket.Ticket, branch string, includeBody bool) Ticket {
+	v := Ticket{
+		ID:          t.ID,
+		Type:        t.Prefix(),
+		Title:       t.Title,
+		Status:      t.Status,
+		Priority:    t.Priority,
+		Labels:      nonNil(t.Labels),
+		Deps:        nonNil(t.Deps),
+		Parent:      t.Parent,
+		Created:     fmtTime(t.Created),
+		Updated:     fmtTime(t.Updated),
+		Degraded:    t.Degraded,
+		Attachments: []store.AttachmentInfo{},
+		Source:      "local-branch",
+		Branch:      branch,
+		ReadOnly:    true,
+	}
+	if includeBody {
+		v.Body = t.Body
 	}
 	return v
 }

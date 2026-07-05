@@ -28,6 +28,14 @@ type Server struct {
 	git       gitx.Client
 	gitMu     sync.RWMutex
 	gitStatus gitx.Status
+
+	// Cross-branch overlay: off-branch tickets computed off the request path.
+	crossMu    sync.RWMutex
+	crossViews []view.Ticket
+	crossIDs   map[string]string // off-branch ticket id -> source branch
+	crossHash  string            // change-detection hash of crossViews
+	ticketsRel string            // git-anchor-relative tickets dir (".pine/tickets")
+	crossKick  chan struct{}     // buffered(1): nudge the poller to refresh
 }
 
 // New constructs a server over the given store.
@@ -35,6 +43,7 @@ func New(st *store.Store, version string) *Server {
 	srv := &Server{store: st, version: version, hub: newHub()}
 	srv.initSearch()
 	srv.initGit()
+	srv.initCrossBranch()
 	return srv
 }
 
@@ -84,7 +93,7 @@ func (srv *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tickets": view.BuildAll(srv.store, true),
+		"tickets": srv.appendOverlay(view.BuildAll(srv.store, true), nil),
 		"board":   srv.buildBoard(),
 		"config":  srv.store.Config(),
 		"git":     srv.gitSnapshot(),
@@ -116,6 +125,7 @@ func (srv *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, unprocessable(err.Error()))
 		return
 	}
+	srv.kickCrossBranch() // crossBranch.enabled / idStyle may have changed
 	writeJSON(w, http.StatusOK, srv.store.Config())
 }
 
@@ -134,6 +144,12 @@ func (srv *Server) buildBoard() boardResp {
 	for _, t := range srv.store.All() {
 		if t.Status != "" && !b.HasStatus(t.Status) {
 			set[t.Status] = true
+		}
+	}
+	// Off-branch tickets can carry a status no local column maps.
+	for _, v := range srv.crossSnapshot() {
+		if v.Status != "" && !b.HasStatus(v.Status) {
+			set[v.Status] = true
 		}
 	}
 	for s := range set {

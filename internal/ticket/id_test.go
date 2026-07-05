@@ -19,6 +19,21 @@ func TestValidIDBothForms(t *testing.T) {
 	}
 }
 
+func TestIsSequentialID(t *testing.T) {
+	// Sequential form: all-numeric suffix shorter than a 6-char hash.
+	for _, id := range []string{"BUG-001", "FEAT-042", "EPIC-1000", "BUG-99999"} {
+		if !IsSequentialID(id) {
+			t.Errorf("%q should be sequential", id)
+		}
+	}
+	// Hash form (has letters, or a full 6-char suffix) and malformed IDs are not.
+	for _, id := range []string{"BUG-7f3k2a", "FEAT-9m2xq4", "BUG-012345", "garbage", "BUG-"} {
+		if IsSequentialID(id) {
+			t.Errorf("%q should not be sequential", id)
+		}
+	}
+}
+
 func TestPrefixOfBothForms(t *testing.T) {
 	if PrefixOf("BUG-001") != "BUG" || PrefixOf("BUG-7f3k2a") != "BUG" || PrefixOf("EPIC-9m2xq4") != "EPIC" {
 		t.Errorf("prefix mismatch")

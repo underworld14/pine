@@ -23,6 +23,14 @@ func unprocessable(msg string) error {
 	return httpError{http.StatusUnprocessableEntity, "validation_failed", msg}
 }
 
+// readOnlyBranch rejects a write to a ticket that lives on another git branch.
+func readOnlyBranch(id, branch string) error {
+	return httpError{
+		http.StatusConflict, "off_branch",
+		id + " is read-only; it lives on branch \"" + branch + "\". Check out that branch to edit it.",
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

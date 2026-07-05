@@ -26,6 +26,7 @@ type Config struct {
 	Attachments Attachments  `json:"attachments"`
 	Git         Git          `json:"git"`
 	IDStyle     string       `json:"idStyle"` // "hash" (default) | "sequential"
+	CrossBranch CrossBranch  `json:"crossBranch"`
 
 	// Extra holds unknown top-level keys, preserved verbatim on save.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -55,6 +56,15 @@ type Git struct {
 	Backend string `json:"backend"`
 }
 
+// CrossBranch controls aggregation of tickets that live on other git branches.
+// When enabled (and the repo uses hash IDs), the board shows tickets from recent
+// local branches, read-only, in addition to the checked-out working tree.
+// Remote (origin/*) scanning is a planned addition and not covered by v1.
+type CrossBranch struct {
+	Enabled          bool `json:"enabled"`          // master toggle
+	ActiveBranchDays int  `json:"activeBranchDays"` // only branches touched within N days
+}
+
 var prefixRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*$`)
 
 // Default returns the configuration pine init writes for a fresh project.
@@ -71,6 +81,7 @@ func Default(projectName string) *Config {
 		Attachments: Attachments{Optimize: true, MaxDimension: 2000, Quality: 80, MaxVideoMB: 50},
 		Git:         Git{Backend: "auto"},
 		IDStyle:     "hash",
+		CrossBranch: CrossBranch{Enabled: true, ActiveBranchDays: 30},
 	}
 }
 
@@ -128,6 +139,8 @@ func parseOnto(c *Config, data []byte) (*Config, error) {
 			_ = json.Unmarshal(raw, &c.Git)
 		case "idStyle":
 			_ = json.Unmarshal(raw, &c.IDStyle)
+		case "crossBranch":
+			_ = json.Unmarshal(raw, &c.CrossBranch)
 		default:
 			if c.Extra == nil {
 				c.Extra = map[string]json.RawMessage{}
@@ -149,6 +162,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		{"attachments", c.Attachments},
 		{"git", c.Git},
 		{"idStyle", c.IDStyle},
+		{"crossBranch", c.CrossBranch},
 	}, c.Extra)
 }
 
@@ -189,6 +203,13 @@ func (c *Config) Validate() []string {
 	default:
 		problems = append(problems, fmt.Sprintf("config.idStyle %q must be hash|sequential", c.IDStyle))
 	}
+	if c.CrossBranch.ActiveBranchDays <= 0 {
+		problems = append(problems, "config.crossBranch.activeBranchDays must be > 0")
+	}
+	// Note: crossBranch.enabled with idStyle "sequential" is NOT a hard error
+	// (it would reject unrelated config saves); it is surfaced as a doctor
+	// warning and disabled at runtime, since sequential IDs collide across
+	// branches and cannot be safely merged.
 	return problems
 }
 

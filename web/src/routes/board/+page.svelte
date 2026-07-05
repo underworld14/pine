@@ -28,6 +28,12 @@
       // Determine which ticket landed in this column with a different status.
       for (const t of e.detail.items as Ticket[]) {
         if (t.status !== status) {
+          if (t.readOnly) {
+            // Off-branch tickets can't be moved from here; snap back with a note.
+            const where = t.branch ? `branch "${t.branch}"` : 'another branch';
+            toasts.push(`${t.id} lives on ${where} — check it out to move it`, 'error');
+            break;
+          }
           try {
             await workspace.move(t.id, status);
           } catch (err) {

@@ -38,12 +38,31 @@ type Status struct {
 	Commits   []Commit `json:"commits"`
 }
 
+// Branch is a local branch head with its tip commit pinned. The SHA is captured
+// at enumeration time so callers can read that branch's tree via an immutable
+// commit object — a branch deleted/renamed/moved afterwards cannot break a later
+// ls-tree/show against the pinned SHA.
+type Branch struct {
+	Name       string    // %(refname:short), e.g. "feature/login"
+	SHA        string    // %(objectname), the tip commit SHA — pin this for tree reads
+	CommitDate time.Time // %(committerdate), tip commit time
+}
+
 // Client reads git state for a repository. Methods never error; problems yield
-// an empty/not-a-repo Status.
+// an empty/not-a-repo Status (or an empty slice / ok=false for the tree readers).
 type Client interface {
 	IsRepo(ctx context.Context) bool
 	Snapshot(ctx context.Context, commitLimit int) Status
 	Files(ctx context.Context) []string
+
+	// Branches lists local branch heads (refs/heads) with pinned tip SHAs.
+	Branches(ctx context.Context) []Branch
+	// ListTreeFiles lists file paths under pathspec in the committed tree at
+	// rev (typically a pinned SHA), without checking anything out.
+	ListTreeFiles(ctx context.Context, rev, pathspec string) []string
+	// ShowFile returns the bytes of one file at rev. ok is false when the file
+	// or rev does not exist.
+	ShowFile(ctx context.Context, rev, path string) (content []byte, ok bool)
 }
 
 const maxChanges = 100
@@ -60,13 +79,18 @@ func New(repoRoot string) Client {
 type cli struct{ repo string }
 
 func (c *cli) run(ctx context.Context, args ...string) (string, error) {
+	out, err := c.runBytes(ctx, args...)
+	return string(out), err
+}
+
+func (c *cli) runBytes(ctx context.Context, args ...string) ([]byte, error) {
 	full := append([]string{"-C", c.repo}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
-	return out.String(), err
+	return out.Bytes(), err
 }
 
 func (c *cli) IsRepo(ctx context.Context) bool {
@@ -176,6 +200,57 @@ func (c *cli) Files(ctx context.Context) []string {
 	return files
 }
 
+// Branches lists local branch heads with pinned tip SHAs and commit dates.
+// One for-each-ref call over refs/heads; \x1f separates fields on each line.
+func (c *cli) Branches(ctx context.Context) []Branch {
+	out, err := c.run(ctx,
+		"for-each-ref",
+		"--format=%(refname:short)%1f%(objectname)%1f%(committerdate:iso8601-strict)",
+		"refs/heads",
+	)
+	if err != nil {
+		return nil
+	}
+	var branches []Branch
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		parts := strings.Split(ln, "\x1f")
+		if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		when, _ := time.Parse(time.RFC3339, parts[2])
+		branches = append(branches, Branch{Name: parts[0], SHA: parts[1], CommitDate: when})
+	}
+	return branches
+}
+
+// ListTreeFiles lists file paths under pathspec in the committed tree at rev,
+// without checking anything out. Paths are repo-root-relative, NUL-delimited.
+func (c *cli) ListTreeFiles(ctx context.Context, rev, pathspec string) []string {
+	out, err := c.run(ctx, "ls-tree", "-r", "--name-only", "-z", rev, "--", pathspec)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+// ShowFile returns the bytes of one file at rev via `git show <rev>:<path>`.
+func (c *cli) ShowFile(ctx context.Context, rev, path string) ([]byte, bool) {
+	out, err := c.runBytes(ctx, "show", rev+":"+path)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
 func shortHash(h string) string {
 	if len(h) > 8 {
 		return h[:8]
@@ -190,4 +265,7 @@ func (nullClient) IsRepo(context.Context) bool { return false }
 func (nullClient) Snapshot(context.Context, int) Status {
 	return Status{Changes: []Change{}, Commits: []Commit{}}
 }
-func (nullClient) Files(context.Context) []string { return nil }
+func (nullClient) Files(context.Context) []string                          { return nil }
+func (nullClient) Branches(context.Context) []Branch                       { return nil }
+func (nullClient) ListTreeFiles(context.Context, string, string) []string  { return nil }
+func (nullClient) ShowFile(context.Context, string, string) ([]byte, bool) { return nil, false }

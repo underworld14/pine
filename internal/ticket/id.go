@@ -23,6 +23,20 @@ func ValidID(id string) bool {
 	return idPattern.MatchString(id)
 }
 
+// IsSequentialID reports whether id uses the legacy sequential form — a purely
+// numeric suffix shorter than a hash suffix. Hash suffixes are always exactly
+// SuffixLen characters, so a shorter all-digit suffix is unambiguously
+// sequential (reaching a 6-digit sequential number would take 100k tickets).
+// Cross-branch aggregation uses this to refuse to merge collision-prone
+// sequential IDs even when a stale config claims idStyle "hash".
+func IsSequentialID(id string) bool {
+	m := idPattern.FindStringSubmatch(id)
+	if m == nil {
+		return false
+	}
+	return numericSuffix.MatchString(m[2]) && len(m[2]) < SuffixLen
+}
+
 // PrefixOf returns the prefix portion of a ticket ID (e.g. "BUG" for both
 // "BUG-001" and "BUG-7f3k2a"), or "" when the ID is malformed.
 func PrefixOf(id string) string {
