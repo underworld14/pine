@@ -26,7 +26,7 @@ func run(t *testing.T, dir string, args ...string) (string, error) {
 func initRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if _, err := run(t, dir, "init"); err != nil {
+	if _, err := run(t, dir, "init", "--skip-agents"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	// Pin sequential IDs so these tests can assert on BUG-001, FEAT-001, etc.
@@ -50,7 +50,7 @@ func TestInitCreatesStructure(t *testing.T) {
 		}
 	}
 	// init is idempotent.
-	out, err := run(t, dir, "init")
+	out, err := run(t, dir, "init", "--skip-agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func createdID(out string) string {
 // bug where the CLI uppercased whole ids and broke hash lookups/deps.
 func TestHashIDsThroughCLI(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "init"); err != nil { // hash by default
+	if _, err := run(t, dir, "init", "--skip-agents"); err != nil { // hash by default
 		t.Fatal(err)
 	}
 	out, _ := run(t, dir, "create", "--type", "bug", "--title", "hashed")
@@ -207,4 +207,46 @@ func containsID(vs []view.Ticket, id string) bool {
 		}
 	}
 	return false
+}
+
+func TestSetupAgents(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "setup", "agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "AGENTS.md") {
+		t.Fatalf("expected install output:\n%s", out)
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "pine:begin") || !strings.Contains(string(data), "pine ready") {
+		t.Fatalf("AGENTS.md missing pine section:\n%s", data)
+	}
+	check, err := run(t, dir, "setup", "agents", "--check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(check, "current") {
+		t.Fatalf("expected current status:\n%s", check)
+	}
+}
+
+func TestSetupYesInstallsAll(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "setup", "agent", "-y"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("missing %s: %v", name, err)
+		}
+		if !strings.Contains(string(data), "pine:begin") {
+			t.Fatalf("%s missing pine section", name)
+		}
+	}
 }

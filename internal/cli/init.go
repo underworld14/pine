@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/contextgen"
+	"github.com/underworld14/pine/internal/setup"
 )
 
 // Default template and prompt files written by pine init. The fix prompt reuses
@@ -24,17 +24,21 @@ const (
 )
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var skipAgents bool
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a .pine workspace in this repository",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInit(cmd.OutOrStdout())
+			return runInit(cmd, skipAgents)
 		},
 	}
+	cmd.Flags().BoolVar(&skipAgents, "skip-agents", false, "skip the coding-agent setup wizard")
+	return cmd
 }
 
-func runInit(w io.Writer) error {
+func runInit(cmd *cobra.Command, skipAgents bool) error {
+	w := cmd.OutOrStdout()
 	base, err := filepath.Abs(flagDir)
 	if err != nil {
 		return err
@@ -69,10 +73,14 @@ func runInit(w io.Writer) error {
 		{filepath.Join(pineDir, "templates", "epic.md"), []byte(tmplEpic)},
 		{filepath.Join(pineDir, "prompts", "fix.md"), []byte(promptFix)},
 	}
+	createdAny := false
 	for _, f := range files {
 		status, err := writeIfAbsent(f.path, f.content)
 		if err != nil {
 			return err
+		}
+		if status == "created" {
+			createdAny = true
 		}
 		rel, _ := filepath.Rel(root, f.path)
 		fmt.Fprintf(w, "  %-8s %s\n", status, rel)
@@ -85,7 +93,21 @@ func runInit(w io.Writer) error {
 		fmt.Fprintf(w, "warning: .pine appears to be gitignored (%q); Pine data is meant to be committed\n", rule)
 	}
 	fmt.Fprintln(w, "\nTickets are committed with your code, so they're branch-scoped — see \"Pine & git branches\" in the README.")
-	fmt.Fprintln(w, "Next: 'pine create --type bug --title \"...\"' or 'pine open'")
+
+	if !skipAgents && createdAny {
+		fmt.Fprintln(w)
+		if setup.IsInteractive(cmd.InOrStdin()) {
+			if err := runAgentWizard(cmd, false); err != nil {
+				fmt.Fprintf(w, "warning: agent setup skipped (%v). Run 'pine setup agent' later.\n", err)
+			}
+		} else {
+			fmt.Fprintln(w, "Skipped agent setup (non-interactive). Run 'pine setup agent' to configure coding agents.")
+		}
+	} else if !skipAgents && !createdAny {
+		fmt.Fprintln(w, "\nSkipped agent setup (workspace already exists). Run 'pine setup agent' to configure coding agents.")
+	}
+
+	fmt.Fprintln(w, "\nNext: 'pine create --type bug --title \"...\"' or 'pine open'")
 	return nil
 }
 

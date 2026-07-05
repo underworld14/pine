@@ -52,6 +52,7 @@ cd web && npx playwright install chromium && npm run test:e2e   # end-to-end
 - `internal/search` — in-memory Bleve index.
 - `internal/gitx` — git awareness behind a swappable interface.
 - `internal/contextgen` / `internal/doctor` — AI context/prompt and health checks.
+- `internal/setup` — agent instruction templates (`pine setup`); keep in sync with CLI commands.
 - `internal/cli` — the cobra command tree.
 - `web/` — SvelteKit UI (embedded into the binary via `go:embed`).
 

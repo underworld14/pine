@@ -116,6 +116,25 @@ pine export --format md        # all tickets as markdown (or --format json)
 write back to `.pine/` (edit `status` to move a ticket, use `deps`/`parent`, run
 `pine ready`/`pine close`).
 
+### Agent setup
+
+`pine init` runs an interactive wizard to install instructions for your coding
+agent (Claude Code, Gemini CLI, Codex, Factory, …). Forgot to set it up?
+
+```sh
+pine setup agent        # interactive wizard
+pine setup agent -y     # install AGENTS.md + CLAUDE.md + GEMINI.md
+pine setup agents       # AGENTS.md only
+pine setup claude       # CLAUDE.md only
+pine setup gemini       # GEMINI.md only
+pine setup --check      # verify sections are current
+pine setup --remove     # strip pine sections
+```
+
+Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each file gets a
+marked `<!-- pine:begin ... -->` section with workflow rules and CLI reference.
+Re-run `pine setup agent` after upgrading Pine to refresh stale sections.
+
 ---
 
 ## How it stores data

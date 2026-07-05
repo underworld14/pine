@@ -57,6 +57,7 @@ func newRootCmd() *cobra.Command {
 		newExportCmd(),
 		newDoctorCmd(),
 		newOptimizeCmd(),
+		newSetupCmd(),
 	)
 	return root
 }
