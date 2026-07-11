@@ -189,3 +189,55 @@ func TestConfigRoundTrip(t *testing.T) {
 		t.Errorf("invalid config should be 422, got %d", resp.StatusCode)
 	}
 }
+
+func TestPutConfigSuccess(t *testing.T) {
+	ts := newTestServer(t)
+	resp, body := do(t, "PUT", ts.URL+"/api/config", `{"crossBranch":{"enabled":false,"activeBranchDays":7}}`, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, `"activeBranchDays":7`) {
+		t.Errorf("update should apply partial field: %s", body)
+	}
+	// The rest of the config (e.g. project name) must be preserved, not reset.
+	if !strings.Contains(body, `"name":"test"`) {
+		t.Errorf("unrelated fields should be preserved: %s", body)
+	}
+}
+
+func TestPutConfigMalformedJSON400(t *testing.T) {
+	ts := newTestServer(t)
+	resp, body := do(t, "PUT", ts.URL+"/api/config", `{bad json`, nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "bad_request") {
+		t.Errorf("expected bad_request code: %s", body)
+	}
+}
+
+func TestHandleBoard(t *testing.T) {
+	ts := newTestServer(t)
+	do(t, "POST", ts.URL+"/api/tickets", `{"type":"bug","title":"x","status":"weird"}`, nil)
+
+	resp, body := do(t, "GET", ts.URL+"/api/board", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var b boardResp
+	if err := json.Unmarshal([]byte(body), &b); err != nil {
+		t.Fatalf("bad json: %v: %s", err, body)
+	}
+	if len(b.Columns) == 0 {
+		t.Errorf("expected default board columns: %+v", b)
+	}
+	found := false
+	for _, u := range b.Unmapped {
+		if u == "weird" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("unmapped should include weird: %+v", b.Unmapped)
+	}
+}

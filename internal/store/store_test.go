@@ -323,6 +323,445 @@ func TestListFilter(t *testing.T) {
 	}
 }
 
+func TestConfigAndBoardGetters(t *testing.T) {
+	s := scaffold(t)
+	cfg := s.Config()
+	if cfg == nil || cfg.Project.Name != "test" {
+		t.Fatalf("Config() = %+v", cfg)
+	}
+	board := s.Board()
+	if board == nil || len(board.Columns) == 0 {
+		t.Fatalf("Board() = %+v", board)
+	}
+}
+
+func TestGraphReflectsDepsAndParent(t *testing.T) {
+	s := scaffold(t)
+	epic, err := s.Create(CreateReq{Type: "epic", Title: "e"})
+	must(t, err)
+	blocker, err := s.Create(CreateReq{Type: "bug", Title: "blocker", Parent: epic.ID})
+	must(t, err)
+	blocked, err := s.Create(CreateReq{Type: "bug", Title: "blocked", Deps: []string{blocker.ID}})
+	must(t, err)
+
+	g := s.Graph()
+	if !g.Blocked(blocked.ID) {
+		t.Errorf("expected %s to be blocked by unmet dep %s", blocked.ID, blocker.ID)
+	}
+	kids := g.Children(epic.ID)
+	if len(kids) != 1 || kids[0].ID != blocker.ID {
+		t.Errorf("children = %#v", kids)
+	}
+	if len(g.Cycles()) != 0 {
+		t.Errorf("expected no cycles, got %v", g.Cycles())
+	}
+}
+
+func TestSortByPriorityThenUpdated(t *testing.T) {
+	s := scaffold(t)
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	ts := []*ticket.Ticket{
+		{ID: "BUG-001", Priority: "low", Updated: base},
+		{ID: "BUG-002", Priority: "critical", Updated: base},
+		{ID: "BUG-003", Priority: "critical", Updated: base.Add(time.Hour)},
+		{ID: "BUG-004", Priority: "medium", Updated: base},
+	}
+	s.SortByPriorityThenUpdated(ts)
+	want := []string{"BUG-003", "BUG-002", "BUG-004", "BUG-001"}
+	var got []string
+	for _, t := range ts {
+		got = append(got, t.ID)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+func TestAttachmentDirs(t *testing.T) {
+	s := scaffold(t)
+	if dirs := s.AttachmentDirs(); dirs != nil {
+		t.Errorf("expected nil for missing attachments root, got %v", dirs)
+	}
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if _, err := s.WriteAttachment(tk.ID, "a.png", []byte("img")); err != nil {
+		t.Fatal(err)
+	}
+	tk2, err := s.Create(CreateReq{Type: "bug", Title: "y"})
+	must(t, err)
+	if _, err := s.WriteAttachment(tk2.ID, "b.png", []byte("img")); err != nil {
+		t.Fatal(err)
+	}
+	// A dot-prefixed entry (e.g. .DS_Store) must be excluded.
+	must(t, os.MkdirAll(filepath.Join(s.attachmentsRoot(), ".hidden"), 0o755))
+
+	dirs := s.AttachmentDirs()
+	if len(dirs) != 2 || dirs[0] != tk.ID || dirs[1] != tk2.ID {
+		t.Errorf("AttachmentDirs() = %v, want [%s %s]", dirs, tk.ID, tk2.ID)
+	}
+}
+
+func TestReloadConfigNoopAndChange(t *testing.T) {
+	s := scaffold(t)
+	cfgPath := filepath.Join(s.Root(), "config.json")
+
+	changed, err := s.ReloadConfig()
+	must(t, err)
+	if changed {
+		t.Errorf("echo of identical config should not report change")
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	must(t, err)
+	edited := strings.Replace(string(raw), `"test"`, `"renamed"`, 1)
+	must(t, os.WriteFile(cfgPath, []byte(edited), 0o644))
+
+	changed, err = s.ReloadConfig()
+	must(t, err)
+	if !changed {
+		t.Fatal("expected change after editing config.json")
+	}
+	if s.Config().Project.Name != "renamed" {
+		t.Errorf("project name = %q", s.Config().Project.Name)
+	}
+}
+
+func TestReloadConfigMalformed(t *testing.T) {
+	s := scaffold(t)
+	cfgPath := filepath.Join(s.Root(), "config.json")
+	must(t, os.WriteFile(cfgPath, []byte("not json"), 0o644))
+	if _, err := s.ReloadConfig(); err == nil {
+		t.Fatal("expected error reloading malformed config")
+	}
+}
+
+func TestReloadBoardNoopAndChange(t *testing.T) {
+	s := scaffold(t)
+	boardPath := filepath.Join(s.Root(), "board.json")
+
+	changed, err := s.ReloadBoard()
+	must(t, err)
+	if changed {
+		t.Errorf("echo of identical board should not report change")
+	}
+
+	raw, err := os.ReadFile(boardPath)
+	must(t, err)
+	edited := strings.Replace(string(raw), "]", `,{"id":"extra","name":"Extra"}]`, 1)
+	must(t, os.WriteFile(boardPath, []byte(edited), 0o644))
+
+	changed, err = s.ReloadBoard()
+	must(t, err)
+	if !changed {
+		t.Fatal("expected change after editing board.json")
+	}
+}
+
+func TestReloadBoardMalformed(t *testing.T) {
+	s := scaffold(t)
+	boardPath := filepath.Join(s.Root(), "board.json")
+	must(t, os.WriteFile(boardPath, []byte("not json"), 0o644))
+	if _, err := s.ReloadBoard(); err == nil {
+		t.Fatal("expected error reloading malformed board")
+	}
+}
+
+func TestSaveConfigWritesToDisk(t *testing.T) {
+	s := scaffold(t)
+	cfg := cloneConfig(t, s)
+	cfg.Project.Name = "updated-name"
+	must(t, s.SaveConfig(cfg))
+
+	if s.Config().Project.Name != "updated-name" {
+		t.Errorf("in-memory config not updated: %q", s.Config().Project.Name)
+	}
+	raw, err := os.ReadFile(filepath.Join(s.Root(), "config.json"))
+	must(t, err)
+	if !strings.Contains(string(raw), "updated-name") {
+		t.Errorf("config.json not written: %s", raw)
+	}
+}
+
+func TestSaveConfigInvalidRejected(t *testing.T) {
+	s := scaffold(t)
+	cfg := cloneConfig(t, s)
+	cfg.Version = 0
+	if err := s.SaveConfig(cfg); err == nil {
+		t.Fatal("expected validation error for version 0")
+	}
+	if s.Config().Version == 0 {
+		t.Errorf("invalid config must not be applied in-memory")
+	}
+}
+
+// cloneConfig returns an independent, mutable copy of the store's current
+// config via a JSON round-trip (Config has no exported clone method).
+func cloneConfig(t *testing.T, s *Store) *config.Config {
+	t.Helper()
+	b, err := s.Config().Bytes()
+	must(t, err)
+	cfg, err := config.Parse(b)
+	must(t, err)
+	return cfg
+}
+
+func TestLoadTicketFileOnReopenAndScanSkips(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	// A subdirectory and a non-matching filename in tickets/ must be skipped by scan.
+	must(t, os.MkdirAll(filepath.Join(s.ticketsDir(), "subdir"), 0o755))
+	must(t, os.WriteFile(filepath.Join(s.ticketsDir(), "README.txt"), []byte("hi"), 0o644))
+
+	reopened, err := Open(s.Root())
+	must(t, err)
+	got, err := reopened.Get(tk.ID)
+	must(t, err)
+	if got.Title != "x" {
+		t.Errorf("reloaded ticket title = %q", got.Title)
+	}
+	if len(reopened.All()) != 1 {
+		t.Errorf("expected exactly 1 ticket after scan, got %d: %#v", len(reopened.All()), reopened.All())
+	}
+}
+
+func TestScanTicketsMissingDirIsNotError(t *testing.T) {
+	pine := filepath.Join(t.TempDir(), ".pine")
+	must(t, os.MkdirAll(pine, 0o755))
+	cfg := config.Default("test")
+	cfgB, err := cfg.Bytes()
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pine, "config.json"), cfgB, 0o644))
+	bB, err := config.DefaultBoard().Bytes()
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pine, "board.json"), bB, 0o644))
+	// Note: no tickets/ subdirectory is created.
+	s, err := Open(pine)
+	must(t, err)
+	if len(s.All()) != 0 {
+		t.Errorf("expected no tickets, got %d", len(s.All()))
+	}
+}
+
+func TestDeleteAttachmentBranches(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if _, err := s.WriteAttachment(tk.ID, "a.png", []byte("img")); err != nil {
+		t.Fatal(err)
+	}
+	// Success path.
+	must(t, s.DeleteAttachment(tk.ID, "a.png"))
+	if len(s.Attachments(tk.ID)) != 0 {
+		t.Errorf("attachment not deleted")
+	}
+	// Deleting a file that no longer exists is a no-op, not an error.
+	if err := s.DeleteAttachment(tk.ID, "a.png"); err != nil {
+		t.Errorf("delete of missing file should be nil, got %v", err)
+	}
+	// Invalid ticket id.
+	if err := s.DeleteAttachment("not-an-id", "a.png"); err == nil {
+		t.Errorf("expected error for invalid ticket id")
+	}
+	// Invalid filename (dotfiles are rejected outright, not just skipped).
+	if err := s.DeleteAttachment(tk.ID, ".hidden"); err == nil {
+		t.Errorf("expected error for invalid filename")
+	}
+}
+
+func TestMimeAndKindAllExtensions(t *testing.T) {
+	cases := map[string][2]string{
+		"a.png":     {"image/png", "image"},
+		"a.jpg":     {"image/jpeg", "image"},
+		"a.jpeg":    {"image/jpeg", "image"},
+		"a.gif":     {"image/gif", "image"},
+		"a.webp":    {"image/webp", "image"},
+		"a.mp4":     {"video/mp4", "video"},
+		"a.mov":     {"video/quicktime", "video"},
+		"a.PNG":     {"image/png", "image"},
+		"a.unknown": {"application/octet-stream", "other"},
+		"noext":     {"application/octet-stream", "other"},
+	}
+	for name, want := range cases {
+		mime, kind := MimeAndKind(name)
+		if mime != want[0] || kind != want[1] {
+			t.Errorf("MimeAndKind(%q) = %q, %q; want %q, %q", name, mime, kind, want[0], want[1])
+		}
+	}
+}
+
+func TestSanitizeNameRejectsBadNames(t *testing.T) {
+	// These fail outright: the base name itself (after filepath.Base) is
+	// empty/"."/".." , contains a literal backslash, or starts with a dot.
+	bad := []string{"", ".", "..", `a\b`, ".hidden", "a..b"}
+	for _, name := range bad {
+		if _, err := sanitizeName(name); err == nil {
+			t.Errorf("sanitizeName(%q) should have been rejected", name)
+		}
+	}
+	// A path with directory components is reduced to its safe basename rather
+	// than rejected — filepath.Base already strips the ".." segments.
+	got, err := sanitizeName("../escape/ok.png")
+	must(t, err)
+	if got != "ok.png" {
+		t.Errorf("sanitizeName(%q) = %q, want reduced basename", "../escape/ok.png", got)
+	}
+	got, err = sanitizeName("  ok.png  ")
+	must(t, err)
+	if got != "ok.png" {
+		t.Errorf("sanitizeName trimmed = %q", got)
+	}
+}
+
+func TestWriteAttachmentInvalidID(t *testing.T) {
+	s := scaffold(t)
+	if _, err := s.WriteAttachment("not-an-id", "a.png", []byte("x")); err == nil {
+		t.Fatal("expected error for invalid ticket id")
+	}
+}
+
+func TestWriteAttachmentInvalidName(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if _, err := s.WriteAttachment(tk.ID, ".hidden", []byte("x")); err == nil {
+		t.Fatal("expected error for invalid attachment filename")
+	}
+}
+
+func TestAttachmentsOnMissingDirReturnsNil(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if got := s.Attachments(tk.ID); got != nil {
+		t.Errorf("Attachments() for a ticket with no attachments dir = %v, want nil", got)
+	}
+}
+
+func TestAttachmentsSkipsDirsAndDotfiles(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if _, err := s.WriteAttachment(tk.ID, "keep.png", []byte("img")); err != nil {
+		t.Fatal(err)
+	}
+	must(t, os.MkdirAll(filepath.Join(s.attachmentDir(tk.ID), "subdir"), 0o755))
+	must(t, os.WriteFile(filepath.Join(s.attachmentDir(tk.ID), ".DS_Store"), []byte("x"), 0o644))
+
+	got := s.Attachments(tk.ID)
+	if len(got) != 1 || got[0].Name != "keep.png" {
+		t.Errorf("Attachments() = %#v, want only keep.png", got)
+	}
+}
+
+func TestAttachmentFilePathInvalidName(t *testing.T) {
+	s := scaffold(t)
+	if _, err := s.AttachmentFilePath("BUG-001", ".hidden"); err == nil {
+		t.Fatal("expected error for invalid attachment filename")
+	}
+}
+
+func TestReloadTicketNonMatchingFilename(t *testing.T) {
+	s := scaffold(t)
+	ch, err := s.ReloadTicket(filepath.Join(s.ticketsDir(), "README.txt"))
+	must(t, err)
+	if ch != (Change{}) {
+		t.Errorf("expected zero-value Change for non-matching filename, got %+v", ch)
+	}
+}
+
+func TestReloadTicketRemoval(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	path := s.ticketPath(tk.ID)
+	must(t, os.Remove(path))
+
+	ch, err := s.ReloadTicket(path)
+	must(t, err)
+	if !ch.Removed || !ch.Changed {
+		t.Fatalf("expected removed+changed, got %+v", ch)
+	}
+	if _, err := s.Get(tk.ID); err != ErrNotFound {
+		t.Errorf("get after removal err = %v", err)
+	}
+	// Reloading an already-absent file again should report no existing entry.
+	ch2, err := s.ReloadTicket(path)
+	must(t, err)
+	if ch2.Removed || ch2.Changed {
+		t.Errorf("second reload of already-removed file: %+v", ch2)
+	}
+}
+
+func TestApplyLearningMtimeFallbackFillsFromDisk(t *testing.T) {
+	s := scaffold(t)
+	path := filepath.Join(s.learningsDir(), "LRN-001.md")
+	must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	must(t, os.WriteFile(path, []byte(`---
+id: LRN-001
+scope: global
+source_agent: manual
+---
+no created field
+`), 0o644))
+	reopened, err := Open(s.Root())
+	must(t, err)
+	l, err := reopened.GetLearning("LRN-001")
+	must(t, err)
+	if l.Created.IsZero() {
+		t.Errorf("expected Created filled from mtime, got zero")
+	}
+}
+
+func TestOpenRejectsMalformedConfig(t *testing.T) {
+	pine := filepath.Join(t.TempDir(), ".pine")
+	must(t, os.MkdirAll(pine, 0o755))
+	must(t, os.WriteFile(filepath.Join(pine, "config.json"), []byte("not json"), 0o644))
+	bB, err := config.DefaultBoard().Bytes()
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pine, "board.json"), bB, 0o644))
+	if _, err := Open(pine); err == nil {
+		t.Fatal("expected error opening store with malformed config.json")
+	}
+}
+
+func TestOpenRejectsMalformedBoard(t *testing.T) {
+	pine := filepath.Join(t.TempDir(), ".pine")
+	must(t, os.MkdirAll(pine, 0o755))
+	cfg := config.Default("test")
+	cfgB, err := cfg.Bytes()
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pine, "config.json"), cfgB, 0o644))
+	must(t, os.WriteFile(filepath.Join(pine, "board.json"), []byte("not json"), 0o644))
+	if _, err := Open(pine); err == nil {
+		t.Fatal("expected error opening store with malformed board.json")
+	}
+}
+
+func TestTemplateUsesCustomFileWhenPresent(t *testing.T) {
+	s := scaffold(t)
+	must(t, os.MkdirAll(filepath.Join(s.Root(), "templates"), 0o755))
+	must(t, os.WriteFile(filepath.Join(s.Root(), "templates", "bug.md"), []byte("Custom bug template\n"), 0o644))
+	tk, err := s.Create(CreateReq{Type: "bug", Title: "x"})
+	must(t, err)
+	if !strings.Contains(tk.Body, "Custom bug template") {
+		t.Errorf("body = %q, want custom template applied", tk.Body)
+	}
+}
+
+func TestAllocHashInExhaustsAttempts(t *testing.T) {
+	s := scaffoldHash(t)
+	// A constant id generator forces every attempt after the first to collide.
+	s.SetIDGen(func() string { return "aaaaaa" })
+	if _, err := s.Create(CreateReq{Type: "bug", Title: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Create(CreateReq{Type: "bug", Title: "second"})
+	if err == nil || !strings.Contains(err.Error(), "could not allocate a unique") {
+		t.Fatalf("expected exhaustion error, got %v", err)
+	}
+}
+
 func TestAttachmentPathTraversalNeutralized(t *testing.T) {
 	s := scaffold(t)
 	// A traversal attempt must never resolve outside the ticket's attachment dir.

@@ -145,6 +145,41 @@ func TestOffBranchWritesRejected(t *testing.T) {
 	}
 }
 
+func TestOverlayMatches(t *testing.T) {
+	v := view.Ticket{
+		ID:     "FEAT-abc123",
+		Status: "doing",
+		Type:   "FEAT",
+		Parent: "EPIC-001",
+		Labels: []string{"ui", "urgent"},
+	}
+
+	cases := []struct {
+		name string
+		f    store.Filter
+		want bool
+	}{
+		{"no filter", store.Filter{}, true},
+		{"status match", store.Filter{Status: "doing"}, true},
+		{"status mismatch", store.Filter{Status: "todo"}, false},
+		{"type match (case-insensitive input)", store.Filter{Type: "feat"}, true},
+		{"type mismatch", store.Filter{Type: "bug"}, false},
+		{"parent match", store.Filter{Parent: "EPIC-001"}, true},
+		{"parent mismatch", store.Filter{Parent: "EPIC-999"}, false},
+		{"label match", store.Filter{Label: "urgent"}, true},
+		{"label mismatch", store.Filter{Label: "backend"}, false},
+		{"combined match", store.Filter{Status: "doing", Type: "feat", Label: "ui"}, true},
+		{"combined one mismatch", store.Filter{Status: "doing", Label: "backend"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := overlayMatches(tc.f, v); got != tc.want {
+				t.Errorf("overlayMatches(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSequentialRepoDoesNotAggregate(t *testing.T) {
 	ts := newCrossBranchServer(t, "sequential")
 	_, body := do(t, "GET", ts.URL+"/api/snapshot", "", nil)

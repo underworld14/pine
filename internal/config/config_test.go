@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -208,5 +210,307 @@ func TestBoardRoundTrip(t *testing.T) {
 	var check map[string]json.RawMessage
 	if err := json.Unmarshal(out, &check); err != nil {
 		t.Errorf("board output not valid JSON: %v", err)
+	}
+}
+
+// --- Load / LoadBoard ---
+
+func TestLoadConfigHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	src := `{
+  "version": 1,
+  "project": {"name": "loaded-app"},
+  "types": [{"prefix": "BUG", "name": "Bug"}],
+  "priorities": ["low", "high"],
+  "git": {"backend": "cli"}
+}`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if c.Project.Name != "loaded-app" {
+		t.Errorf("project name = %q", c.Project.Name)
+	}
+	if c.Git.Backend != "cli" {
+		t.Errorf("backend = %q", c.Git.Backend)
+	}
+}
+
+func TestLoadConfigMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist.json")
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing config file")
+	}
+}
+
+func TestLoadConfigMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"version": 1,`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for malformed config JSON")
+	}
+	if !strings.Contains(err.Error(), "config.json is not valid JSON") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadBoardHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "board.json")
+	src := `{"version": 1, "columns": [{"status": "todo", "title": "Todo"}, {"status": "done", "title": "Done"}]}`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, err := LoadBoard(path)
+	if err != nil {
+		t.Fatalf("LoadBoard returned error: %v", err)
+	}
+	if len(b.Columns) != 2 {
+		t.Errorf("columns = %d, want 2", len(b.Columns))
+	}
+	if b.Columns[0].Status != "todo" || b.Columns[1].Status != "done" {
+		t.Errorf("unexpected columns: %+v", b.Columns)
+	}
+}
+
+func TestLoadBoardMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist.json")
+	_, err := LoadBoard(path)
+	if err == nil {
+		t.Fatal("expected error for missing board file")
+	}
+}
+
+func TestLoadBoardMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "board.json")
+	if err := os.WriteFile(path, []byte(`not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBoard(path)
+	if err == nil {
+		t.Fatal("expected error for malformed board JSON")
+	}
+	if !strings.Contains(err.Error(), "board.json is not valid JSON") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// --- Board.Statuses ---
+
+func TestBoardStatusesOrder(t *testing.T) {
+	b := &Board{Version: 1, Columns: []Column{
+		{Status: "todo", Title: "Todo"},
+		{Status: "doing", Title: "Doing"},
+		{Status: "review", Title: "Review"},
+		{Status: "done", Title: "Done"},
+	}}
+	statuses := b.Statuses()
+	want := []string{"todo", "doing", "review", "done"}
+	if len(statuses) != len(want) {
+		t.Fatalf("statuses = %v, want %v", statuses, want)
+	}
+	for i, s := range want {
+		if statuses[i] != s {
+			t.Errorf("statuses[%d] = %q, want %q", i, statuses[i], s)
+		}
+	}
+}
+
+func TestBoardStatusesEmpty(t *testing.T) {
+	b := &Board{Version: 1}
+	statuses := b.Statuses()
+	if len(statuses) != 0 {
+		t.Errorf("statuses = %v, want empty", statuses)
+	}
+}
+
+// --- Additional Validate branches ---
+
+func TestConfigValidateVersionZero(t *testing.T) {
+	c := Default("x")
+	c.Version = 0
+	problems := c.Validate()
+	if !containsSubstring(problems, "config.version must be >= 1") {
+		t.Errorf("expected version problem, got %v", problems)
+	}
+}
+
+func TestConfigValidateEmptyTypes(t *testing.T) {
+	c := Default("x")
+	c.Types = nil
+	problems := c.Validate()
+	if !containsSubstring(problems, "config.types must not be empty") {
+		t.Errorf("expected types problem, got %v", problems)
+	}
+}
+
+func TestConfigValidateBadTypePrefix(t *testing.T) {
+	c := Default("x")
+	c.Types = []TicketType{{Prefix: "bug", Name: "Bug"}}
+	problems := c.Validate()
+	found := false
+	for _, p := range problems {
+		if strings.Contains(p, "must be uppercase letters/digits") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected bad prefix problem, got %v", problems)
+	}
+}
+
+func TestConfigValidateEmptyPriorities(t *testing.T) {
+	c := Default("x")
+	c.Priorities = nil
+	problems := c.Validate()
+	if !containsSubstring(problems, "config.priorities must not be empty") {
+		t.Errorf("expected priorities problem, got %v", problems)
+	}
+}
+
+func TestConfigValidateQualityTooLow(t *testing.T) {
+	c := Default("x")
+	c.Attachments.Quality = 0
+	problems := c.Validate()
+	if !containsSubstring(problems, "config.attachments.quality must be 1..100") {
+		t.Errorf("expected quality problem, got %v", problems)
+	}
+}
+
+func TestConfigValidateMaxDimensionZero(t *testing.T) {
+	c := Default("x")
+	c.Attachments.MaxDimension = 0
+	problems := c.Validate()
+	if !containsSubstring(problems, "config.attachments.maxDimension must be > 0") {
+		t.Errorf("expected maxDimension problem, got %v", problems)
+	}
+}
+
+func TestBoardValidateVersionZero(t *testing.T) {
+	b := DefaultBoard()
+	b.Version = 0
+	problems := b.Validate()
+	if !containsSubstring(problems, "board.version must be >= 1") {
+		t.Errorf("expected version problem, got %v", problems)
+	}
+}
+
+func TestBoardValidateEmptyColumns(t *testing.T) {
+	b := &Board{Version: 1}
+	problems := b.Validate()
+	if !containsSubstring(problems, "board.columns must not be empty") {
+		t.Errorf("expected columns problem, got %v", problems)
+	}
+}
+
+func TestBoardValidateEmptyStatus(t *testing.T) {
+	b := &Board{Version: 1, Columns: []Column{{Status: "  ", Title: "Blank"}}}
+	problems := b.Validate()
+	if !containsSubstring(problems, "board column has an empty status") {
+		t.Errorf("expected empty status problem, got %v", problems)
+	}
+}
+
+func TestBoardValidateEmptyTitle(t *testing.T) {
+	b := &Board{Version: 1, Columns: []Column{{Status: "todo", Title: "  "}}}
+	problems := b.Validate()
+	found := false
+	for _, p := range problems {
+		if strings.Contains(p, `board column "todo" has an empty title`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected empty title problem, got %v", problems)
+	}
+}
+
+func containsSubstring(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// --- FirstStatus / HasStatus / TypeByPrefix / HasPriority edge cases ---
+
+func TestFirstStatusEmptyBoard(t *testing.T) {
+	b := &Board{Version: 1}
+	if got := b.FirstStatus(); got != "todo" {
+		t.Errorf("FirstStatus() on empty board = %q, want %q", got, "todo")
+	}
+}
+
+func TestHasStatusNotFound(t *testing.T) {
+	b := DefaultBoard()
+	if b.HasStatus("nonexistent") {
+		t.Errorf("HasStatus should be false for unknown status")
+	}
+}
+
+func TestHasStatusEmptyBoard(t *testing.T) {
+	b := &Board{Version: 1}
+	if b.HasStatus("todo") {
+		t.Errorf("HasStatus should be false on empty board")
+	}
+}
+
+func TestTypeByPrefixNotFound(t *testing.T) {
+	c := Default("x")
+	if _, ok := c.TypeByPrefix("NOPE"); ok {
+		t.Errorf("TypeByPrefix should not find NOPE")
+	}
+}
+
+func TestTypeByPrefixEmptyConfig(t *testing.T) {
+	c := &Config{}
+	if _, ok := c.TypeByPrefix("BUG"); ok {
+		t.Errorf("TypeByPrefix should not find anything on empty config")
+	}
+}
+
+func TestTypeByPrefixCaseInsensitive(t *testing.T) {
+	c := Default("x")
+	tt, ok := c.TypeByPrefix("bug")
+	if !ok {
+		t.Fatal("TypeByPrefix should match lowercase input against uppercase prefix")
+	}
+	if tt.Prefix != "BUG" {
+		t.Errorf("TypeByPrefix returned %+v", tt)
+	}
+}
+
+func TestHasPriorityNotFound(t *testing.T) {
+	c := Default("x")
+	if c.HasPriority("nonexistent") {
+		t.Errorf("HasPriority should be false for unknown priority")
+	}
+}
+
+func TestHasPriorityEmptyConfig(t *testing.T) {
+	c := &Config{}
+	if c.HasPriority("low") {
+		t.Errorf("HasPriority should be false on empty config")
+	}
+}
+
+func TestHasPriorityCaseInsensitive(t *testing.T) {
+	c := Default("x")
+	if !c.HasPriority("CRITICAL") {
+		t.Errorf("HasPriority should match case-insensitively")
 	}
 }
