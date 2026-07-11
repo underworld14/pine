@@ -46,6 +46,8 @@ cd web && npx playwright install chromium && npm run test:e2e   # end-to-end
 ## Project layout
 
 - `internal/ticket` — pure domain: frontmatter parse/serialize, IDs, dependency graph.
+- `internal/learning` — pure domain: frontmatter parse/serialize, supersede graph for persistent learnings (structurally parallel to `internal/ticket`).
+- `internal/frontmatter` — YAML frontmatter primitives shared by `internal/ticket` and `internal/learning`.
 - `internal/store` — the single atomic write path over `.pine/`.
 - `internal/server` — HTTP+JSON API, SSE live sync, static UI serving.
 - `internal/attach` — image optimizer (pure-Go WebP).

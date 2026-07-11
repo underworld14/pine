@@ -23,6 +23,9 @@ func TestWatcherClassifiesTicketAndConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(pine, "tickets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(pine, "learnings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	w, err := New(pine)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +44,13 @@ func TestWatcherClassifiesTicketAndConfig(t *testing.T) {
 	batch = waitEvent(t, w)
 	if !hasKind(batch, KindConfig, "") {
 		t.Fatalf("expected KindConfig, got %+v", batch)
+	}
+
+	// Learning write.
+	os.WriteFile(filepath.Join(pine, "learnings", "LRN-001.md"), []byte("---\nid: LRN-001\n---\n"), 0o644)
+	batch = waitEvent(t, w)
+	if !hasKind(batch, KindLearning, "LRN-001") {
+		t.Fatalf("expected KindLearning LRN-001, got %+v", batch)
 	}
 }
 

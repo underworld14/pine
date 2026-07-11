@@ -44,6 +44,7 @@ func TestInitCreatesStructure(t *testing.T) {
 	for _, p := range []string{
 		".pine/config.json", ".pine/board.json",
 		".pine/templates/bug.md", ".pine/prompts/fix.md",
+		".pine/learnings",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -248,5 +249,292 @@ func TestSetupYesInstallsAll(t *testing.T) {
 		if !strings.Contains(string(data), "pine:begin") {
 			t.Fatalf("%s missing pine section", name)
 		}
+		if !strings.Contains(string(data), "Persistent learnings") {
+			t.Fatalf("%s missing learnings subsection", name)
+		}
+	}
+}
+
+func TestLearnCreateListSearchDoctor(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "Always use the query builder", "--scope", "global", "--tags", "db,test")
+	if err != nil {
+		t.Fatalf("learn: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Captured LRN-") {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, ".pine", "learnings"))
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 learning file, got %d", len(entries))
+	}
+
+	if _, err := run(t, dir, "learn", "Prefer CSS variables", "--scope", "global", "--tags", "ui"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "create", "--type", "bug", "--title", "schema"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "learn", "Ticket-scoped insight", "--scope", "ticket", "--ticket", "BUG-001", "--tags", "db"); err != nil {
+		t.Fatal(err)
+	}
+
+	listOut, err := run(t, dir, "learn", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []view.Learning
+	if err := json.Unmarshal([]byte(listOut), &listed); err != nil {
+		t.Fatalf("list json: %v\n%s", err, listOut)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("want 3 learnings, got %d", len(listed))
+	}
+
+	searchOut, err := run(t, dir, "learn", "search", "query builder", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hits []view.LearningHit
+	if err := json.Unmarshal([]byte(searchOut), &hits); err != nil {
+		t.Fatalf("search json: %v\n%s", err, searchOut)
+	}
+	if len(hits) == 0 || !strings.Contains(hits[0].Body, "query builder") {
+		t.Fatalf("search missed query builder:\n%s", searchOut)
+	}
+
+	docOut, err := run(t, dir, "doctor")
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, docOut)
+	}
+	if strings.Contains(strings.ToLower(docOut), "malformed") {
+		t.Fatalf("doctor reported learning errors:\n%s", docOut)
+	}
+}
+
+func TestLearnSupersedes(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "old UNIQUE_STALE_ZZZ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "Captured "))
+	out2, err := run(t, dir, "learn", "new UNIQUE_TIP_YYY", "--supersedes", oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newID := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out2), "Captured "))
+
+	show, err := run(t, dir, "learn", "show", oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show, "superseded by: "+newID) {
+		t.Fatalf("show old missing superseded by:\n%s", show)
+	}
+	showNew, err := run(t, dir, "learn", "show", newID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(showNew, "supersedes: "+oldID) {
+		t.Fatalf("show new missing supersedes:\n%s", showNew)
+	}
+
+	listOut, err := run(t, dir, "learn", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []view.Learning
+	if err := json.Unmarshal([]byte(listOut), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != newID {
+		t.Fatalf("default list should only show tip: %#v", listed)
+	}
+
+	searchOut, err := run(t, dir, "learn", "search", "UNIQUE_STALE_ZZZ", "--json")
+	if err != nil {
+		t.Fatalf("default search: %v\n%s", err, searchOut)
+	}
+	var hits []view.LearningHit
+	if err := json.Unmarshal([]byte(searchOut), &hits); err != nil {
+		t.Fatalf("search json: %v\n%s", err, searchOut)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("default search should not find stale text: %s", searchOut)
+	}
+	searchInc, err := run(t, dir, "learn", "search", "UNIQUE_STALE_ZZZ", "--include-superseded", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(searchInc), &hits); err != nil {
+		t.Fatalf("include search json: %v\n%s", err, searchInc)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("include-superseded should find stale text: %s", searchInc)
+	}
+}
+
+func TestLearnCites(t *testing.T) {
+	dir := initRepo(t)
+	citedRel := "internal/foo.go"
+	citedAbs := filepath.Join(dir, citedRel)
+	if err := os.MkdirAll(filepath.Dir(citedAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(citedAbs, []byte("package foo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "learn", "race in UNIQUE_CITE_AAA", "--cites", citedRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "Captured "))
+
+	show, err := run(t, dir, "learn", "show", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show, "✓ "+citedRel) {
+		t.Fatalf("show should mark cite present:\n%s", show)
+	}
+
+	docOut, err := run(t, dir, "doctor")
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, docOut)
+	}
+	if strings.Contains(docOut, "dangling cite") {
+		t.Fatalf("doctor should not warn while file exists:\n%s", docOut)
+	}
+
+	if err := os.Remove(citedAbs); err != nil {
+		t.Fatal(err)
+	}
+
+	show2, err := run(t, dir, "learn", "show", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show2, "✗ "+citedRel) {
+		t.Fatalf("show should mark cite missing:\n%s", show2)
+	}
+
+	docOut2, _ := run(t, dir, "doctor")
+	if !strings.Contains(docOut2, "dangling cite "+citedRel) {
+		t.Fatalf("doctor should report dangling cite:\n%s", docOut2)
+	}
+
+	listOut, err := run(t, dir, "learn", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []view.Learning
+	if err := json.Unmarshal([]byte(listOut), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("default list should hide citation-stale: %#v", listed)
+	}
+
+	listInc, err := run(t, dir, "learn", "list", "--include-stale", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(listInc), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != id || !listed[0].Stale {
+		t.Fatalf("include-stale should show marked entry: %#v", listed)
+	}
+
+	searchOut, err := run(t, dir, "learn", "search", "UNIQUE_CITE_AAA", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hits []view.LearningHit
+	if err := json.Unmarshal([]byte(searchOut), &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("default search should hide citation-stale: %s", searchOut)
+	}
+	searchInc, err := run(t, dir, "learn", "search", "UNIQUE_CITE_AAA", "--include-stale", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(searchInc), &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !hits[0].Stale {
+		t.Fatalf("include-stale search: %#v", hits)
+	}
+}
+
+func TestLearnCitesAndSupersedesIndependent(t *testing.T) {
+	dir := initRepo(t)
+	citedRel := "internal/both.go"
+	citedAbs := filepath.Join(dir, citedRel)
+	if err := os.MkdirAll(filepath.Dir(citedAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(citedAbs, []byte("package both\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "learn", "old BOTH_FILTER_QQQ", "--cites", citedRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "Captured "))
+	if _, err := run(t, dir, "learn", "new tip", "--supersedes", oldID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(citedAbs); err != nil {
+		t.Fatal(err)
+	}
+
+	listOut, err := run(t, dir, "learn", "list", "--include-superseded", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []view.Learning
+	if err := json.Unmarshal([]byte(listOut), &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range listed {
+		if l.ID == oldID {
+			t.Fatalf("include-superseded alone should still hide citation-stale: %#v", listed)
+		}
+	}
+
+	listStale, err := run(t, dir, "learn", "list", "--include-stale", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(listStale), &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range listed {
+		if l.ID == oldID {
+			t.Fatalf("include-stale alone should still hide superseded: %#v", listed)
+		}
+	}
+
+	listBoth, err := run(t, dir, "learn", "list", "--include-superseded", "--include-stale", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(listBoth), &listed); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, l := range listed {
+		if l.ID == oldID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("both flags should show entry: %#v", listed)
 	}
 }

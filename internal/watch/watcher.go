@@ -1,8 +1,9 @@
 // Package watch turns raw filesystem notifications under .pine/ into debounced,
 // classified change events. It never interprets fsnotify op flags directly; it
 // only reports "something happened at this path", and the coordinator reconciles
-// by re-reading. It watches .pine/ and .pine/tickets/ (config, board, tickets);
-// attachment changes are broadcast by the API, not the watcher (see design).
+// by re-reading. It watches .pine/, .pine/tickets/, and .pine/learnings/
+// (config, board, tickets, learnings); attachment changes are broadcast by the
+// API, not the watcher (see design).
 package watch
 
 import (
@@ -22,13 +23,14 @@ const (
 	KindTicket
 	KindConfig
 	KindBoard
+	KindLearning
 )
 
 // Event is a debounced, classified change at a path.
 type Event struct {
 	Kind Kind
 	Path string
-	ID   string // ticket id when Kind == KindTicket
+	ID   string // ticket/learning id when Kind is KindTicket or KindLearning
 }
 
 var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9a-hj-km-np-tv-z]+\.md$`)
@@ -44,7 +46,7 @@ type Watcher struct {
 	done    chan struct{}
 }
 
-// New starts watching .pine and .pine/tickets.
+// New starts watching .pine, .pine/tickets, and .pine/learnings.
 func New(pineDir string) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -56,9 +58,10 @@ func New(pineDir string) (*Watcher, error) {
 		out:     make(chan []Event, 16),
 		done:    make(chan struct{}),
 	}
-	// Best-effort: watch the root and the tickets subdirectory.
+	// Best-effort: watch the root and known subdirectories.
 	_ = fsw.Add(pineDir)
 	_ = fsw.Add(filepath.Join(pineDir, "tickets"))
+	_ = fsw.Add(filepath.Join(pineDir, "learnings"))
 	go w.loop()
 	return w, nil
 }
@@ -114,8 +117,9 @@ func (w *Watcher) loop() {
 			if !ok {
 				return
 			}
-			// A newly created tickets/ directory should be watched too.
-			if ev.Op&fsnotify.Create != 0 && filepath.Base(ev.Name) == "tickets" {
+			// A newly created tickets/ or learnings/ directory should be watched too.
+			base := filepath.Base(ev.Name)
+			if ev.Op&fsnotify.Create != 0 && (base == "tickets" || base == "learnings") {
 				_ = w.fsw.Add(ev.Name)
 			}
 			if e, relevant := w.classify(ev.Name); relevant {
@@ -154,6 +158,11 @@ func (w *Watcher) classify(path string) (Event, bool) {
 		if ticketFileRe.MatchString(base) {
 			id := strings.TrimSuffix(base, ".md")
 			return Event{Kind: KindTicket, Path: path, ID: id}, true
+		}
+	case strings.HasPrefix(rel, "learnings/"):
+		if ticketFileRe.MatchString(base) {
+			id := strings.TrimSuffix(base, ".md")
+			return Event{Kind: KindLearning, Path: path, ID: id}, true
 		}
 	}
 	return Event{}, false

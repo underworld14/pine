@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/ticket"
 )
 
@@ -39,6 +40,7 @@ const (
 	dirAttachments = "attachments"
 	dirTemplates   = "templates"
 	dirPrompts     = "prompts"
+	dirLearnings   = "learnings"
 	fileConfig     = "config.json"
 	fileBoard      = "board.json"
 )
@@ -50,6 +52,10 @@ type Store struct {
 	mu    sync.RWMutex
 	cache map[string]*ticket.Ticket
 	hash  map[string]string // ticket id -> sha256 of on-disk bytes
+
+	learningCache map[string]*learning.Learning
+	learningHash  map[string]string // learning id -> sha256 of on-disk bytes
+
 	cfg   *config.Config
 	board *config.Board
 
@@ -72,15 +78,20 @@ func Open(pineDir string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{
-		root:     abs,
-		cache:    map[string]*ticket.Ticket{},
-		hash:     map[string]string{},
-		cfg:      cfg,
-		board:    board,
-		now:      time.Now,
-		idSuffix: ticket.NewSuffix,
+		root:          abs,
+		cache:         map[string]*ticket.Ticket{},
+		hash:          map[string]string{},
+		learningCache: map[string]*learning.Learning{},
+		learningHash:  map[string]string{},
+		cfg:           cfg,
+		board:         board,
+		now:           time.Now,
+		idSuffix:      ticket.NewSuffix,
 	}
 	if err := s.scanTickets(); err != nil {
+		return nil, err
+	}
+	if err := s.scanLearnings(); err != nil {
 		return nil, err
 	}
 	return s, nil

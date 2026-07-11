@@ -1,6 +1,6 @@
-// Package search maintains an in-memory Bleve index over tickets. Nothing is
-// persisted to .pine (the index is rebuilt at startup), and updates are applied
-// incrementally as tickets change.
+// Package search maintains an in-memory Bleve index over tickets and
+// learnings. Nothing is persisted to .pine (the index is rebuilt at startup),
+// and updates are applied incrementally as tickets/learnings change.
 package search
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/blevesearch/bleve/v2/search/query"
 )
 
-// Doc is the indexable projection of a ticket.
+// Doc is the indexable projection of a ticket or learning.
 type Doc struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
@@ -25,13 +25,27 @@ type Doc struct {
 	Status       string   `json:"status"`
 	Priority     string   `json:"priority"`
 	Type         string   `json:"type"`
+	Kind         string   `json:"kind"`        // "ticket" | "learning"
+	Scope        string   `json:"scope"`       // learning only
+	Tags         []string `json:"tags"`        // learning only
+	Ticket       string   `json:"ticket"`      // learning only
+	SourceAgent  string   `json:"sourceAgent"` // learning only
 }
+
+// Kind constants for Doc.Kind / Filter.Kind.
+const (
+	KindTicket   = "ticket"
+	KindLearning = "learning"
+)
 
 // Filter narrows results to matching field values (all optional).
 type Filter struct {
 	Status   string
 	Type     string
 	Priority string
+	Kind     string
+	Scope    string
+	Tags     []string // all must match (AND)
 }
 
 // Hit is one search result.
@@ -109,6 +123,18 @@ func (i *Index) Search(qstr string, f Filter, limit int) []Hit {
 	if f.Priority != "" {
 		must = append(must, termOn("priority", strings.ToLower(f.Priority)))
 	}
+	if f.Kind != "" {
+		must = append(must, termOn("kind", strings.ToLower(f.Kind)))
+	}
+	if f.Scope != "" {
+		must = append(must, termOn("scope", strings.ToLower(f.Scope)))
+	}
+	for _, tag := range f.Tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag != "" {
+			must = append(must, termOn("tags", tag))
+		}
+	}
 
 	req := bleve.NewSearchRequestOptions(bleve.NewConjunctionQuery(must...), limit, 0, false)
 	req.Highlight = bleve.NewHighlightWithStyle(html.Name)
@@ -162,11 +188,14 @@ func userTextQuery(q string) query.Query {
 	labelTerm := bleve.NewTermQuery(strings.ToLower(q))
 	labelTerm.SetField("labels")
 
+	tagTerm := bleve.NewTermQuery(strings.ToLower(q))
+	tagTerm.SetField("tags")
+
 	filesMatch := bleve.NewMatchQuery(q)
 	filesMatch.SetField("relatedFiles")
 
 	return bleve.NewDisjunctionQuery(
-		idExact, idPrefix, titleMatch, titlePrefix, bodyMatch, labelTerm, filesMatch,
+		idExact, idPrefix, titleMatch, titlePrefix, bodyMatch, labelTerm, tagTerm, filesMatch,
 	)
 }
 
@@ -213,6 +242,11 @@ func buildMapping() mapping.IndexMapping {
 	dm.AddFieldMappingsAt("status", kw())
 	dm.AddFieldMappingsAt("priority", kw())
 	dm.AddFieldMappingsAt("type", kw())
+	dm.AddFieldMappingsAt("kind", kw())
+	dm.AddFieldMappingsAt("scope", kw())
+	dm.AddFieldMappingsAt("tags", kw())
+	dm.AddFieldMappingsAt("ticket", kw())
+	dm.AddFieldMappingsAt("sourceAgent", kw())
 
 	im.DefaultMapping = dm
 	return im

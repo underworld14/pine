@@ -19,6 +19,10 @@ pine prompt <ID>              # paste-ready fix brief for one ticket
 pine context                  # full project briefing (run at session start)
 pine list [--json]            # filterable ticket list
 pine create / update / close  # CLI mutations
+pine learn "<insight>"        # capture a durable cross-agent learning
+pine learn list                # list captured learnings
+pine learn search "<query>"   # search learnings
+pine learn show <id>           # one learning's detail and supersede chain
 pine doctor                   # health check
 ```
 
@@ -35,3 +39,23 @@ pine doctor                   # health check
 ### Live context
 
 Run `pine context` at the start of a session for current tickets, git state, and ready work.
+
+### Persistent learnings
+
+This project uses `pine learn` to capture cross-session, cross-agent knowledge in `.pine/learnings/`.
+
+Call `pine learn "<insight>" --scope <global|ticket> [--tags a,b] [--ticket ID]` when:
+
+- You're corrected by the user on something non-obvious (a convention, a gotcha, a "don't do X")
+- You discover a workaround or project-specific constraint not already documented elsewhere
+- You finish a task and realize the approach should be the default next time
+
+If a new insight replaces an earlier learning rather than adding to it, use `pine learn ... --supersedes <id>` instead of leaving both active.
+
+If your insight references specific files, add `--cites path/to/file` so Pine can flag it automatically if that file is later deleted.
+
+Pass `--source <claude-code|codex|gemini|manual>` matching whichever agent you are, so learnings stay attributable across agents (default is `manual`). If your insight text is exactly "list", "search", or "show", pass it via `--text` instead of as a positional argument — e.g. `pine learn --text "list"`.
+
+Do this before ending your turn. Skip routine facts already covered by docs, comments, or file structure — this is not a changelog.
+
+Relevant learnings are included automatically in `pine context`. Run `pine learn search "<topic>"` for anything not surfaced there.

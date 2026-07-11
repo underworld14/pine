@@ -176,6 +176,15 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 		b.WriteString("\n")
 	}
 
+	var cwdHints []string
+	for _, c := range git.Changes {
+		cwdHints = append(cwdHints, c.Path)
+	}
+	learnings, more := SelectLearnings(s, LearningSelectOpts{CwdHints: cwdHints, Limit: 10})
+	if block := FormatLearningsBlock(learnings, more); block != "" {
+		b.WriteString(block)
+	}
+
 	// Conventions — the part that teaches agents to write back.
 	b.WriteString("## Conventions\n")
 	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent.\n")
@@ -184,6 +193,7 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
 	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
+	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/learnings/`.\n")
 
 	return b.String()
 }

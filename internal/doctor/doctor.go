@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/store"
 	"github.com/underworld14/pine/internal/ticket"
 )
@@ -115,7 +116,8 @@ func Run(s *store.Store) *Report {
 		r.err("dependency cycle among: " + strings.Join(cyc, ", "))
 	}
 
-	checkStrays(r, root)
+	checkStrays(r, root, "tickets", "ticket")
+	checkLearnings(r, s, byID)
 	checkAttachmentDirs(r, s, byID, cfg.Attachments.MaxVideoMB)
 	checkGitignore(r, root)
 
@@ -145,8 +147,11 @@ func checkAttachmentRefs(r *Report, s *store.Store, t *ticket.Ticket) {
 	}
 }
 
-func checkStrays(r *Report, root string) {
-	entries, err := os.ReadDir(filepath.Join(root, "tickets"))
+// checkStrays scans root/dir for entries that don't look like a valid
+// <label> filename (e.g. tickets/ or learnings/, both use the same ID
+// alphabet).
+func checkStrays(r *Report, root, dir, label string) {
+	entries, err := os.ReadDir(filepath.Join(root, dir))
 	if err != nil {
 		return
 	}
@@ -156,9 +161,61 @@ func checkStrays(r *Report, root string) {
 			continue
 		}
 		if !ticketFileRe.MatchString(name) {
-			r.warn("tickets/" + name + ": stray file (not a valid ticket name)")
+			r.warn(dir + "/" + name + ": stray file (not a valid " + label + " name)")
 		}
 	}
+}
+
+func checkLearnings(r *Report, s *store.Store, byID map[string]*ticket.Ticket) {
+	allLearnings := s.AllLearnings()
+	learningByID := map[string]*learning.Learning{}
+	for _, l := range allLearnings {
+		learningByID[l.ID] = l
+	}
+	for _, l := range allLearnings {
+		if l.Degraded {
+			r.err(l.ID + ": malformed (" + strings.Join(l.Warnings, "; ") + ")")
+			continue
+		}
+		for _, w := range l.Warnings {
+			r.warn(l.ID + ": " + w)
+		}
+		if l.FrontmatterID != "" && l.FrontmatterID != l.ID {
+			r.warn(l.ID + ": frontmatter id is " + l.FrontmatterID + " (does not match filename)")
+		}
+		if l.Scope != "" && !learning.ValidScope(l.Scope) {
+			r.warn(l.ID + ": scope " + l.Scope + " is not valid (expected global or ticket)")
+		}
+		if l.SourceAgent != "" && !learning.ValidSourceAgent(l.SourceAgent) {
+			r.warn(l.ID + ": source_agent " + l.SourceAgent + " is not recognized")
+		}
+		if l.Scope == learning.ScopeTicket {
+			if l.Ticket == "" {
+				r.warn(l.ID + ": scope is ticket but ticket field is empty")
+			} else if byID[l.Ticket] == nil {
+				r.warn(l.ID + ": dangling ticket ref " + l.Ticket)
+			}
+		}
+		if l.Supersedes != "" {
+			if _, ok := learningByID[l.Supersedes]; !ok {
+				r.warn(l.ID + ": dangling supersedes ref " + l.Supersedes)
+			}
+		}
+		for _, cite := range l.Cites {
+			cite = strings.TrimSpace(cite)
+			if cite == "" {
+				continue
+			}
+			if !s.CiteExists(cite) {
+				r.warn(l.ID + ": dangling cite " + cite)
+			}
+		}
+	}
+	fwd, _ := learning.BuildEdges(allLearnings)
+	for _, cyc := range learning.FindCycles(fwd) {
+		r.err("supersede cycle among: " + strings.Join(cyc, ", "))
+	}
+	checkStrays(r, s.Root(), "learnings", "learning")
 }
 
 func checkAttachmentDirs(r *Report, s *store.Store, byID map[string]*ticket.Ticket, maxVideoMB int) {

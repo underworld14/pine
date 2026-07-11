@@ -99,24 +99,31 @@ func (s *Store) resolvePrefix(typ string) (string, bool) {
 	return "", false
 }
 
-// allocID reserves a free ID for the prefix with an exclusive create (the empty
-// reservation is replaced by saveTicket's atomic rename). Hash style (default)
-// generates a random suffix — no directory scan and no cross-branch collisions;
-// sequential style scans for the highest existing number.
+// allocID reserves a free ticket ID for the prefix (the empty reservation is
+// replaced by saveTicket's atomic rename).
 func (s *Store) allocID(prefix string) (string, error) {
-	if err := os.MkdirAll(s.ticketsDir(), 0o755); err != nil {
+	return s.allocIDIn(s.ticketsDir(), s.ticketPath, prefix, "ticket")
+}
+
+// allocIDIn reserves a free ID for prefix inside dir, using pathFor to build
+// each candidate's reservation path with an exclusive create. kind names the
+// entity for error messages only ("ticket", "learning"). Hash style (default)
+// generates a random suffix — no directory scan and no cross-branch
+// collisions; sequential style scans dir for the highest existing number.
+func (s *Store) allocIDIn(dir string, pathFor func(id string) string, prefix, kind string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	if s.cfg.IDStyle == "sequential" {
-		return s.allocSequential(prefix)
+		return s.allocSequentialIn(dir, pathFor, prefix, kind)
 	}
-	return s.allocHash(prefix)
+	return s.allocHashIn(pathFor, prefix, kind)
 }
 
-func (s *Store) allocHash(prefix string) (string, error) {
+func (s *Store) allocHashIn(pathFor func(id string) string, prefix, kind string) (string, error) {
 	for i := 0; i < 20; i++ {
 		id := ticket.MakeID(prefix, s.idSuffix())
-		f, err := os.OpenFile(s.ticketPath(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(pathFor(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			f.Close()
 			return id, nil
@@ -125,12 +132,12 @@ func (s *Store) allocHash(prefix string) (string, error) {
 			return "", err
 		}
 	}
-	return "", errors.New("could not allocate a unique ticket id")
+	return "", errors.New("could not allocate a unique " + kind + " id")
 }
 
-func (s *Store) allocSequential(prefix string) (string, error) {
+func (s *Store) allocSequentialIn(dir string, pathFor func(id string) string, prefix, kind string) (string, error) {
 	max := 0
-	if entries, err := os.ReadDir(s.ticketsDir()); err == nil {
+	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
 			name := strings.TrimSuffix(e.Name(), ".md")
 			if p, n, err := ticket.SplitID(name); err == nil && p == prefix && n > max {
@@ -140,7 +147,7 @@ func (s *Store) allocSequential(prefix string) (string, error) {
 	}
 	for i := 1; i <= 500; i++ {
 		id := ticket.FormatID(prefix, max+i)
-		f, err := os.OpenFile(s.ticketPath(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(pathFor(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			f.Close()
 			return id, nil
@@ -149,7 +156,7 @@ func (s *Store) allocSequential(prefix string) (string, error) {
 			return "", err
 		}
 	}
-	return "", errors.New("could not allocate a ticket id")
+	return "", errors.New("could not allocate a " + kind + " id")
 }
 
 // template returns the body skeleton for a ticket type: a templates/<name>.md

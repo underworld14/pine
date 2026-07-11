@@ -47,7 +47,7 @@ func runInit(cmd *cobra.Command, skipAgents bool) error {
 	pineDir := filepath.Join(root, ".pine")
 	projectName := filepath.Base(root)
 
-	for _, d := range []string{"", "tickets", "attachments", "templates", "prompts"} {
+	for _, d := range []string{"", "tickets", "attachments", "templates", "prompts", "learnings"} {
 		if err := os.MkdirAll(filepath.Join(pineDir, d), 0o755); err != nil {
 			return err
 		}

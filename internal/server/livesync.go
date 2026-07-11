@@ -69,6 +69,9 @@ func (srv *Server) applyWatchBatch(batch []watch.Event) {
 			if changed, _ := srv.store.ReloadBoard(); changed {
 				srv.emit("board.updated", fsOrigin(), map[string]any{"board": srv.buildBoard()})
 			}
+		case watch.KindLearning:
+			// Refresh learning cache for prompt/context; no board SSE (FE does not render learnings).
+			_, _ = srv.store.ReloadLearning(ev.Path)
 		}
 	}
 	if len(updatedIDs) == 0 {

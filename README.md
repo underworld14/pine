@@ -7,14 +7,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/underworld14/pine)](https://goreportcard.com/report/github.com/underworld14/pine)
 
-Pine keeps your bugs, features, epics, and project context as plain files inside
-your repository, so humans and AI agents (Claude Code, Codex, Gemini CLI, …) work
-from the same source of truth. No cloud, no accounts, no database — the repo is
-the database and git is the history.
+Pine keeps your bugs, features, epics, project context, and persistent learnings
+as plain files inside your repository, so humans and AI agents (Claude Code,
+Codex, Gemini CLI, …) work from the same source of truth. No cloud, no accounts,
+no database — the repo is the database and git is the history.
 
 A single binary gives you three surfaces over the same `.pine/` folder:
 
-- a **Beads-style CLI** for tickets, dependencies, and epics from the terminal;
+- a **Beads-style CLI** for tickets, dependencies, epics, and learnings from the terminal;
 - a **beautiful local web UI** (kanban board, markdown editor, attachments, search);
 - **AI context/prompt generation** so an agent understands the project instantly.
 
@@ -114,7 +114,31 @@ pine export --format md        # all tickets as markdown (or --format json)
 
 `pine context` includes a **Conventions** block that teaches the agent how to
 write back to `.pine/` (edit `status` to move a ticket, use `deps`/`parent`, run
-`pine ready`/`pine close`).
+`pine ready`/`pine close`). It also surfaces **Relevant Learnings** from
+`.pine/learnings/` when any exist — tip-resolving supersede chains so agents
+never see a stale rule, and excluding learnings whose `--cites` paths are
+missing on disk.
+
+```sh
+pine learn "Always use the query builder" --scope global --tags db
+pine learn "Fixed in BUG-014" --scope ticket --ticket BUG-014 --supersedes LRN-001
+pine learn "Race in retry" --cites internal/webhook/retry.go
+pine learn list                    # hides superseded and citation-stale by default
+pine learn search "migration"      # same default
+pine learn show LRN-001            # supersedes / superseded by / cite ✓✗
+pine learn list --include-superseded
+pine learn list --include-stale
+```
+
+Learnings are cross-session, cross-agent insights (gotchas, conventions,
+workarounds). Capture them with `pine learn` so Claude Code, Codex, Cursor, and
+Gemini all see them next session. When a new insight replaces an older one, pass
+`--supersedes <LRN-id>`; use `--include-superseded` to audit. When an insight
+depends on specific files, pass `--cites path/to/file` — if that path is later
+deleted, `pine doctor` reports a dangling cite and list/search/context hide the
+entry by default (`--include-stale` to audit). Renames (`git mv`) look like
+deletions; that is intentional. `pine doctor` also flags dangling `supersedes`
+refs and supersede cycles.
 
 ### Agent setup
 
@@ -132,8 +156,9 @@ pine setup --remove     # strip pine sections
 ```
 
 Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each file gets a
-marked `<!-- pine:begin ... -->` section with workflow rules and CLI reference.
-Re-run `pine setup agent` after upgrading Pine to refresh stale sections.
+marked `<!-- pine:begin ... -->` section with workflow rules, CLI reference, and
+instructions for `pine learn` (persistent cross-agent learnings). Re-run
+`pine setup agent` after upgrading Pine to refresh stale sections.
 
 ---
 
@@ -147,6 +172,8 @@ Everything lives in `.pine/` and is meant to be committed:
   board.json            # kanban columns (statuses only — never ticket ids)
   tickets/
     BUG-001.md          # YAML frontmatter + markdown body
+  learnings/
+    LRN-001.md          # durable cross-agent insights
   attachments/
     BUG-001/login.webp  # optimized on ingest
   templates/            # bug.md, feature.md, epic.md
@@ -179,7 +206,26 @@ The **filename is the canonical id**; frontmatter `status` decides which board
 column a ticket is in. Pine parses leniently — a malformed or agent-written file
 is surfaced as a read-only "degraded" ticket rather than lost, and `pine doctor`
 reports every problem (schema errors, dangling deps, dependency cycles, broken
-attachment references, orphaned directories, stray files).
+attachment references, orphaned directories, stray files, dangling `supersedes`
+refs, and supersede cycles).
+
+A learning file:
+
+```markdown
+---
+id: LRN-001
+scope: global
+tags:
+  - db
+source_agent: manual
+created: 2026-07-11T10:00:00Z
+---
+
+Always use the query builder — raw SQL caused schema drift (see BUG-014).
+```
+
+The **filename is the canonical id**. Optional frontmatter `supersedes: LRN-xxx`
+marks a replacement; `superseded_by` is derived at read time and never stored.
 
 ---
 
@@ -222,6 +268,9 @@ then choose the same number and clash on merge (`pine doctor` flags duplicates).
 - **New issue** in ≤10s: press `c`, type a title, paste a screenshot (`⌘V`),
   `⌘↵`. Screenshots are downscaled and re-encoded to WebP on the way in.
 - **Search** (`/`) and a **command palette** (`⌘K`).
+
+Persistent learnings (`pine learn`) are a CLI/AI-context surface only — they
+don't appear in the web UI, its board, or its search.
 
 Attachments are optimized on upload: images are EXIF-oriented, downscaled to
 2000px, and re-encoded to lossy WebP (kept only if smaller); videos pass through

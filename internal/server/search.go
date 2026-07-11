@@ -37,6 +37,7 @@ func docFromTicket(t *ticket.Ticket) search.Doc {
 		Status:       t.Status,
 		Priority:     t.Priority,
 		Type:         t.Prefix(),
+		Kind:         search.KindTicket,
 	}
 }
 
@@ -76,6 +77,7 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	hits := srv.search.Search(q.Get("q"), search.Filter{
+		Kind:     search.KindTicket,
 		Status:   q.Get("status"),
 		Type:     q.Get("type"),
 		Priority: q.Get("priority"),

@@ -1,5 +1,6 @@
 // Package cli implements Pine's cobra command tree: init, serve, the Beads-style
-// ticket commands (list/show/create/update/close/dep/ready), and the AI helpers
+// ticket commands (list/show/create/update/close/dep/ready), learn
+// (capture/list/search/show persistent learnings), and the AI helpers
 // (context/prompt/export/doctor/optimize).
 package cli
 
@@ -52,6 +53,7 @@ func newRootCmd() *cobra.Command {
 		newCloseCmd(),
 		newDepCmd(),
 		newReadyCmd(),
+		newLearnCmd(),
 		newContextCmd(),
 		newPromptCmd(),
 		newExportCmd(),
