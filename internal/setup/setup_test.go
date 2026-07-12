@@ -2,10 +2,14 @@ package setup
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/underworld14/pine/internal/tui"
 )
 
 func newTestRunner(dir string) (*Runner, *bytes.Buffer) {
@@ -23,6 +27,9 @@ func TestRunnerInstallAllRecipes(t *testing.T) {
 	}
 
 	for _, info := range Registry() {
+		if info.File == "" {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(dir, info.File))
 		if err != nil {
 			t.Fatalf("missing %s: %v", info.File, err)
@@ -30,6 +37,12 @@ func TestRunnerInstallAllRecipes(t *testing.T) {
 		if !strings.Contains(string(data), "pine:begin") {
 			t.Fatalf("%s missing pine section:\n%s", info.File, data)
 		}
+	}
+	if CheckCodexHook(dir) != StatusCurrent {
+		t.Fatalf("expected Codex hook current after install-all, got %s", CheckCodexHook(dir))
+	}
+	if CheckCursorHook(dir) != StatusCurrent {
+		t.Fatalf("expected Cursor hook current after install-all, got %s", CheckCursorHook(dir))
 	}
 	if !strings.Contains(buf.String(), "installed AGENTS.md") {
 		t.Fatalf("expected install output, got:\n%s", buf.String())
@@ -230,31 +243,14 @@ func TestErrUnknownRecipeError(t *testing.T) {
 	}
 }
 
-func TestReadYes(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"y\n", true},
-		{"yes\n", true},
-		{"YES\n", true},
-		{"Y\n", true},
-		{"n\n", false},
-		{"no\n", false},
-		{"\n", false},
-		{"", false}, // EOF with no data -> false
-	}
-	for _, c := range cases {
-		got := readYes(strings.NewReader(c.in))
-		if got != c.want {
-			t.Errorf("readYes(%q) = %v, want %v", c.in, got, c.want)
-		}
-	}
-}
-
-func TestWizardDefaultSelectionOnBlankLine(t *testing.T) {
+func TestWizardDefaultSelection(t *testing.T) {
 	var buf bytes.Buffer
-	r := &Runner{Out: &buf, In: strings.NewReader("\n")}
+	r := &Runner{
+		Out: &buf,
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return []Recipe{RecipeAgents}, nil
+		},
+	}
 
 	got, err := r.Wizard(true)
 	if err != nil {
@@ -267,8 +263,12 @@ func TestWizardDefaultSelectionOnBlankLine(t *testing.T) {
 
 func TestWizardToggleSelection(t *testing.T) {
 	var buf bytes.Buffer
-	// Turn agents off and claude on, then confirm with a blank line.
-	r := &Runner{Out: &buf, In: strings.NewReader("1,2\n\n")}
+	r := &Runner{
+		Out: &buf,
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return []Recipe{RecipeClaude}, nil
+		},
+	}
 
 	got, err := r.Wizard(true)
 	if err != nil {
@@ -281,7 +281,12 @@ func TestWizardToggleSelection(t *testing.T) {
 
 func TestWizardQuit(t *testing.T) {
 	var buf bytes.Buffer
-	r := &Runner{Out: &buf, In: strings.NewReader("q\n")}
+	r := &Runner{
+		Out: &buf,
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return nil, tui.ErrCancelled
+		},
+	}
 
 	_, err := r.Wizard(true)
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
@@ -291,8 +296,12 @@ func TestWizardQuit(t *testing.T) {
 
 func TestWizardNoToolsSelected(t *testing.T) {
 	var buf bytes.Buffer
-	// Toggle agents off (its only default), then confirm.
-	r := &Runner{Out: &buf, In: strings.NewReader("1\n\n")}
+	r := &Runner{
+		Out: &buf,
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return nil, nil
+		},
+	}
 
 	_, err := r.Wizard(true)
 	if err == nil || !strings.Contains(err.Error(), "no tools selected") {
@@ -300,25 +309,130 @@ func TestWizardNoToolsSelected(t *testing.T) {
 	}
 }
 
-func TestWizardReadError(t *testing.T) {
+func TestWizardPickError(t *testing.T) {
 	var buf bytes.Buffer
-	r := &Runner{Out: &buf, In: strings.NewReader("")}
+	r := &Runner{
+		Out: &buf,
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return nil, fmt.Errorf("boom")
+		},
+	}
 
 	_, err := r.Wizard(true)
-	if err == nil {
-		t.Fatalf("expected an error reading from an empty input")
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected boom error, got %v", err)
 	}
 }
 
 func TestWizardNoPineDeclined(t *testing.T) {
 	var buf bytes.Buffer
-	r := &Runner{Out: &buf, In: strings.NewReader("n\n")}
+	r := &Runner{
+		Out: &buf,
+		Confirm: func(title, description string, defaultYes bool) (bool, error) {
+			if !strings.Contains(title, "No .pine") {
+				t.Fatalf("unexpected confirm title: %q", title)
+			}
+			if defaultYes {
+				t.Fatal("expected default No")
+			}
+			return false, nil
+		},
+	}
 
 	_, err := r.Wizard(false)
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("expected cancellation when declining without .pine, got %v", err)
 	}
-	if !strings.Contains(buf.String(), "no .pine directory found") {
-		t.Fatalf("expected warning about missing .pine, got:\n%s", buf.String())
+}
+
+func TestWizardNoPineConfirmCancelled(t *testing.T) {
+	var buf bytes.Buffer
+	r := &Runner{
+		Out: &buf,
+		Confirm: func(title, description string, defaultYes bool) (bool, error) {
+			return false, tui.ErrCancelled
+		},
+	}
+
+	_, err := r.Wizard(false)
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+}
+
+func TestWizardNoPineAccepted(t *testing.T) {
+	var buf bytes.Buffer
+	r := &Runner{
+		Out: &buf,
+		Confirm: func(title, description string, defaultYes bool) (bool, error) {
+			return true, nil
+		},
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return []Recipe{RecipeAgents, RecipeClaude}, nil
+		},
+	}
+
+	got, err := r.Wizard(false)
+	if err != nil {
+		t.Fatalf("wizard: %v", err)
+	}
+	if len(got) != 2 || got[0] != RecipeAgents || got[1] != RecipeClaude {
+		t.Fatalf("expected [agents claude], got %v", got)
+	}
+}
+
+func TestPickRecipesViaMultiSelectHook(t *testing.T) {
+	var buf bytes.Buffer
+	r := &Runner{
+		Out: &buf,
+		MultiSelect: func(title string, choices []tui.Choice) ([]string, error) {
+			if title == "" || len(choices) == 0 {
+				t.Fatal("expected title and choices")
+			}
+			// agents is pre-selected in choices; pick claude + agents
+			return []string{string(RecipeAgents), string(RecipeClaude)}, nil
+		},
+	}
+	got, err := r.Wizard(true)
+	if err != nil {
+		t.Fatalf("wizard: %v", err)
+	}
+	if len(got) != 2 || got[0] != RecipeAgents || got[1] != RecipeClaude {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPickRecipesMultiSelectError(t *testing.T) {
+	r := &Runner{
+		Out: io.Discard,
+		MultiSelect: func(title string, choices []tui.Choice) ([]string, error) {
+			return nil, tui.ErrCancelled
+		},
+	}
+	_, err := r.Wizard(true)
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestConfirmDefaultPathUsesHook(t *testing.T) {
+	// Cover confirm() when Confirm is set (already covered) and when using MultiSelect path.
+	called := false
+	r := &Runner{
+		Out: io.Discard,
+		Confirm: func(title, description string, defaultYes bool) (bool, error) {
+			called = true
+			return true, nil
+		},
+		PickRecipes: func(infos []RecipeInfo) ([]Recipe, error) {
+			return []Recipe{RecipeAgents}, nil
+		},
+	}
+	got, err := r.Wizard(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || len(got) != 1 {
+		t.Fatalf("called=%v got=%v", called, got)
 	}
 }

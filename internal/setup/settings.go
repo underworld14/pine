@@ -16,7 +16,7 @@ const hookSentinel = "[pine:learn-reminder]"
 // learnReminderCommand is the shell command Pine installs as a Claude Code Stop
 // hook: a gentle, non-blocking nudge to capture learnings before the turn ends.
 func learnReminderCommand() string {
-	return "echo \"Pine reminder: capture durable cross-session insights with 'pine learn' before ending. " + hookSentinel + "\""
+	return "echo \"" + learnReminderText() + "\""
 }
 
 // InstallSkillFile writes the Pine SKILL.md into an agent's skills directory.
@@ -193,7 +193,7 @@ func readJSONObject(path string) (map[string]any, error) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf(".claude/settings.json is not valid JSON: %w", err)
+		return nil, fmt.Errorf("%s is not valid JSON: %w", filepath.Base(path), err)
 	}
 	if doc == nil {
 		doc = map[string]any{}

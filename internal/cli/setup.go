@@ -16,7 +16,7 @@ func newSetupCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Manage agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md)",
+		Short: "Manage agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor hooks)",
 		Long:  "Configure coding agents to use Pine. Run 'pine setup agent' for the interactive wizard.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if list || check || remove || printT {
@@ -46,11 +46,11 @@ func newSetupAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Interactive wizard to choose coding agent integrations",
-		Long:  "Install or refresh AGENTS.md, CLAUDE.md, and GEMINI.md. Also runs automatically during 'pine init'.",
+		Long:  "Install or refresh AGENTS.md, CLAUDE.md, GEMINI.md, and Cursor hooks. Also runs automatically during 'pine init'.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !yes && !setup.IsInteractive(cmd.InOrStdin()) {
-				return fmt.Errorf("non-interactive terminal: use 'pine setup agent -y' or 'pine setup agents|claude|gemini'")
+				return fmt.Errorf("non-interactive terminal: use 'pine setup agent -y' or 'pine setup agents|claude|gemini|cursor'")
 			}
 			return runAgentWizard(cmd, yes)
 		},
@@ -66,9 +66,13 @@ func newSetupRecipeCmd(recipe setup.Recipe) *cobra.Command {
 		printT bool
 	)
 	info, _ := setup.Lookup(recipe)
+	short := fmt.Sprintf("Install or update %s", info.File)
+	if info.File == "" {
+		short = fmt.Sprintf("Install or update %s", info.Label)
+	}
 	cmd := &cobra.Command{
 		Use:   string(recipe),
-		Short: fmt.Sprintf("Install or update %s", info.File),
+		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd, []setup.Recipe{recipe}, setupFlags{

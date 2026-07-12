@@ -1,12 +1,13 @@
 package setup
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/underworld14/pine/internal/tui"
 )
 
 // Runner performs setup operations against a repository root.
@@ -16,6 +17,13 @@ type Runner struct {
 	Opts    RenderOptions
 	Out     io.Writer
 	In      io.Reader
+
+	// Confirm, when set, replaces the interactive Yes/No prompt (tests inject fakes).
+	Confirm func(title, description string, defaultYes bool) (bool, error)
+	// PickRecipes, when set, replaces the interactive multi-select (tests inject fakes).
+	PickRecipes func(infos []RecipeInfo) ([]Recipe, error)
+	// MultiSelect, when set, replaces tui.MultiSelectIO inside the default pickRecipes path.
+	MultiSelect func(title string, choices []tui.Choice) ([]string, error)
 }
 
 // Install writes or updates sections for the given recipes.
@@ -25,15 +33,17 @@ func (r *Runner) Install(recipes []Recipe) error {
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		section, err := RenderSection(recipe, r.Version, r.Opts)
-		if err != nil {
-			return err
+		if info.File != "" {
+			section, err := RenderSection(recipe, r.Version, r.Opts)
+			if err != nil {
+				return err
+			}
+			path := filepath.Join(r.Root, info.File)
+			if err := MergeFile(path, section); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.Out, "  installed %s\n", info.File)
 		}
-		path := filepath.Join(r.Root, info.File)
-		if err := MergeFile(path, section); err != nil {
-			return err
-		}
-		fmt.Fprintf(r.Out, "  installed %s\n", info.File)
 
 		if info.SkillFile != "" {
 			status, err := InstallSkillFile(r.Root, info, r.Opts)
@@ -44,13 +54,13 @@ func (r *Runner) Install(recipes []Recipe) error {
 				fmt.Fprintf(r.Out, "  installed %s\n", info.SkillFile)
 			}
 		}
-		if info.InstallsHook {
-			status, err := InstallClaudeHook(r.Root)
+		if info.HookKind != HookKindNone {
+			status, label, err := installHook(r.Root, info.HookKind)
 			if err != nil {
 				return err
 			}
 			if status == "installed" {
-				fmt.Fprintf(r.Out, "  installed .claude/settings.json (learn-reminder hook)\n")
+				fmt.Fprintf(r.Out, "  installed %s\n", label)
 			}
 		}
 	}
@@ -64,15 +74,17 @@ func (r *Runner) Remove(recipes []Recipe) error {
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		path := filepath.Join(r.Root, info.File)
-		removed, err := RemoveSection(path)
-		if err != nil {
-			return err
-		}
-		if removed {
-			fmt.Fprintf(r.Out, "  removed section from %s\n", info.File)
-		} else {
-			fmt.Fprintf(r.Out, "  no pine section in %s\n", info.File)
+		if info.File != "" {
+			path := filepath.Join(r.Root, info.File)
+			removed, err := RemoveSection(path)
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Fprintf(r.Out, "  removed section from %s\n", info.File)
+			} else {
+				fmt.Fprintf(r.Out, "  no pine section in %s\n", info.File)
+			}
 		}
 		if info.SkillFile != "" {
 			if ok, err := RemoveSkillFile(r.Root, info); err != nil {
@@ -81,11 +93,12 @@ func (r *Runner) Remove(recipes []Recipe) error {
 				fmt.Fprintf(r.Out, "  removed %s\n", info.SkillFile)
 			}
 		}
-		if info.InstallsHook {
-			if ok, err := RemoveClaudeHook(r.Root); err != nil {
+		if info.HookKind != HookKindNone {
+			ok, label, err := removeHook(r.Root, info.HookKind)
+			if err != nil {
 				return err
 			} else if ok {
-				fmt.Fprintf(r.Out, "  removed learn-reminder hook from .claude/settings.json\n")
+				fmt.Fprintf(r.Out, "  removed learn-reminder hook from %s\n", label)
 			}
 		}
 	}
@@ -99,19 +112,24 @@ func (r *Runner) Check(recipes []Recipe) error {
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		section, err := RenderSection(recipe, r.Version, r.Opts)
-		if err != nil {
-			return err
+		if info.File != "" {
+			section, err := RenderSection(recipe, r.Version, r.Opts)
+			if err != nil {
+				return err
+			}
+			body, _, _ := ExtractSection(section)
+			path := filepath.Join(r.Root, info.File)
+			status := CheckFile(path, body, recipe, r.Version)
+			fmt.Fprintf(r.Out, "  %s (%s): %s\n", info.Label, info.File, status)
+		} else {
+			fmt.Fprintf(r.Out, "  %s: (hooks only)\n", info.Label)
 		}
-		body, _, _ := ExtractSection(section)
-		path := filepath.Join(r.Root, info.File)
-		status := CheckFile(path, body, recipe, r.Version)
-		fmt.Fprintf(r.Out, "  %s (%s): %s\n", info.Label, info.File, status)
 		if info.SkillFile != "" {
 			fmt.Fprintf(r.Out, "  %s: %s\n", info.SkillFile, CheckSkillFile(r.Root, info, r.Opts))
 		}
-		if info.InstallsHook {
-			fmt.Fprintf(r.Out, "  .claude/settings.json (learn-reminder hook): %s\n", CheckClaudeHook(r.Root))
+		if info.HookKind != HookKindNone {
+			status, label := checkHook(r.Root, info.HookKind)
+			fmt.Fprintf(r.Out, "  %s: %s\n", label, status)
 		}
 	}
 	return nil
@@ -119,8 +137,16 @@ func (r *Runner) Check(recipes []Recipe) error {
 
 // Print writes rendered sections to Out.
 func (r *Runner) Print(recipes []Recipe) error {
-	for i, recipe := range recipes {
-		if i > 0 {
+	printed := 0
+	for _, recipe := range recipes {
+		info, ok := Lookup(recipe)
+		if !ok {
+			return errUnknownRecipe(recipe)
+		}
+		if info.File == "" {
+			continue
+		}
+		if printed > 0 {
 			fmt.Fprintln(r.Out, "---")
 		}
 		section, err := RenderSection(recipe, r.Version, r.Opts)
@@ -128,6 +154,7 @@ func (r *Runner) Print(recipes []Recipe) error {
 			return err
 		}
 		fmt.Fprintln(r.Out, section)
+		printed++
 	}
 	return nil
 }
@@ -135,94 +162,97 @@ func (r *Runner) Print(recipes []Recipe) error {
 // List prints available recipes.
 func (r *Runner) List() {
 	for _, info := range Registry() {
-		fmt.Fprintf(r.Out, "  %-8s %s — %s\n", info.Name, info.File, info.Description)
+		file := info.File
+		if file == "" {
+			file = "(hooks only)"
+		}
+		fmt.Fprintf(r.Out, "  %-8s %s — %s\n", info.Name, file, info.Description)
 	}
 }
 
 // Wizard runs the interactive multi-select and returns chosen recipes.
 func (r *Runner) Wizard(hasPine bool) ([]Recipe, error) {
 	if !hasPine {
-		fmt.Fprintln(r.Out, "warning: no .pine directory found — run 'pine init' first.")
-		fmt.Fprint(r.Out, "Continue anyway? [y/N] ")
-		if !readYes(r.In) {
-			return nil, fmt.Errorf("setup cancelled")
-		}
-	}
-
-	selected := map[Recipe]bool{
-		RecipeAgents: true,
-		RecipeClaude: false,
-		RecipeGemini: false,
-	}
-
-	in := r.In
-	if in == nil {
-		in = os.Stdin
-	}
-	reader := bufio.NewReader(in)
-
-	for {
-		fmt.Fprintln(r.Out)
-		fmt.Fprintln(r.Out, "Pine agent setup — choose tools to integrate:")
-		fmt.Fprintln(r.Out)
-		infos := Registry()
-		for i, info := range infos {
-			mark := "[ ]"
-			if selected[info.Name] {
-				mark = "[x]"
-			}
-			fmt.Fprintf(r.Out, "  %s %d. %-12s (%s)\n", mark, i+1, info.Label, info.Description)
-		}
-		fmt.Fprintln(r.Out, "\nToggle: 1,2,3  |  Enter to confirm  |  q to cancel")
-		fmt.Fprint(r.Out, "> ")
-
-		line, err := reader.ReadString('\n')
+		ok, err := r.confirm(
+			"No .pine directory found — run 'pine init' first.",
+			"Continue anyway?",
+			false,
+		)
 		if err != nil {
+			if errors.Is(err, tui.ErrCancelled) {
+				return nil, fmt.Errorf("setup cancelled")
+			}
 			return nil, err
 		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
-		if strings.EqualFold(line, "q") || strings.EqualFold(line, "quit") {
+		if !ok {
 			return nil, fmt.Errorf("setup cancelled")
-		}
-		for _, part := range strings.FieldsFunc(line, func(r rune) bool {
-			return r == ',' || r == ' ' || r == '\t'
-		}) {
-			switch part {
-			case "1":
-				selected[RecipeAgents] = !selected[RecipeAgents]
-			case "2":
-				selected[RecipeClaude] = !selected[RecipeClaude]
-			case "3":
-				selected[RecipeGemini] = !selected[RecipeGemini]
-			}
 		}
 	}
 
+	recipes, err := r.pickRecipes(Registry())
+	if err != nil {
+		if errors.Is(err, tui.ErrCancelled) {
+			return nil, fmt.Errorf("setup cancelled")
+		}
+		return nil, err
+	}
+	if len(recipes) == 0 {
+		return nil, fmt.Errorf("no tools selected")
+	}
+	return recipes, nil
+}
+
+func (r *Runner) confirm(title, description string, defaultYes bool) (bool, error) {
+	if r.Confirm != nil {
+		return r.Confirm(title, description, defaultYes)
+	}
+	return tui.ConfirmIO(title, description, defaultYes, r.In, r.Out)
+}
+
+func (r *Runner) pickRecipes(infos []RecipeInfo) ([]Recipe, error) {
+	if r.PickRecipes != nil {
+		return r.PickRecipes(infos)
+	}
+
+	choices := make([]tui.Choice, 0, len(infos))
+	for _, info := range infos {
+		choices = append(choices, tui.Choice{
+			Key:         string(info.Name),
+			Label:       info.Label,
+			Description: info.Description,
+			Selected:    info.Name == RecipeAgents,
+		})
+	}
+
+	var (
+		keys []string
+		err  error
+	)
+	if r.MultiSelect != nil {
+		keys, err = r.MultiSelect("Pine agent setup — choose tools to integrate:", choices)
+	} else {
+		keys, err = tui.MultiSelectIO(
+			"Pine agent setup — choose tools to integrate:",
+			choices,
+			r.In,
+			r.Out,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	selected := make(map[Recipe]bool, len(keys))
+	for _, key := range keys {
+		selected[Recipe(key)] = true
+	}
 	var out []Recipe
 	for _, recipe := range AllRecipes {
 		if selected[recipe] {
 			out = append(out, recipe)
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no tools selected")
-	}
 	return out, nil
-}
-
-func readYes(r io.Reader) bool {
-	if r == nil {
-		r = os.Stdin
-	}
-	line, err := bufio.NewReader(r).ReadString('\n')
-	if err != nil {
-		return false
-	}
-	line = strings.TrimSpace(strings.ToLower(line))
-	return line == "y" || line == "yes"
 }
 
 // RepoRoot resolves the repository root from a starting directory. When no

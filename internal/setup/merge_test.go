@@ -86,14 +86,32 @@ func TestRenderSectionIncludesHeader(t *testing.T) {
 	if !strings.Contains(section, "todo, done") {
 		t.Fatalf("board columns missing:\n%s", section)
 	}
-	if !strings.Contains(section, "Persistent learnings") || !strings.Contains(section, "pine learn") {
-		t.Fatalf("learnings subsection missing:\n%s", section)
+	// Root injector stays short: always-on rules + pointer to the skill.
+	if !strings.Contains(section, "pine learn") || !strings.Contains(section, "load the pine skill") {
+		t.Fatalf("summary + skill pointer missing:\n%s", section)
 	}
-	if !strings.Contains(section, "--supersedes") {
-		t.Fatalf("supersedes guidance missing:\n%s", section)
+	if !strings.Contains(section, ".agents/skills/pine/SKILL.md") {
+		t.Fatalf("skill path missing:\n%s", section)
 	}
-	if !strings.Contains(section, "--cites") {
-		t.Fatalf("cites guidance missing:\n%s", section)
+	// Full command catalog / learnings lifecycle belong in the skill, not the root.
+	if strings.Contains(section, "Essential commands") || strings.Contains(section, "--supersedes") {
+		t.Fatalf("root section should not embed the full skill body:\n%s", section)
+	}
+}
+
+func TestRenderSkillIsComprehensive(t *testing.T) {
+	skill := RenderSkill(RenderOptions{BoardColumns: "todo, doing, done"})
+	for _, want := range []string{
+		"Essential commands",
+		"Persistent learnings",
+		"--supersedes",
+		"--cites",
+		"todo, doing, done",
+		"pine context",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Fatalf("skill missing %q:\n%s", want, skill)
+		}
 	}
 }
 

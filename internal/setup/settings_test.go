@@ -124,3 +124,123 @@ func mustLookup(t *testing.T, r Recipe) RecipeInfo {
 	}
 	return info
 }
+
+func TestCheckClaudeHookStatuses(t *testing.T) {
+	dir := t.TempDir()
+	if got := CheckClaudeHook(dir); got != StatusMissing {
+		t.Fatalf("missing: %s", got)
+	}
+	r, _ := newTestRunner(dir)
+	if err := r.Install([]Recipe{RecipeClaude}); err != nil {
+		t.Fatal(err)
+	}
+	if got := CheckClaudeHook(dir); got != StatusCurrent {
+		t.Fatalf("current: %s", got)
+	}
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	data, _ := os.ReadFile(settings)
+	// JSON stores escaped quotes; mutate a stable substring of the command.
+	stale := strings.Replace(string(data), "[pine:learn-reminder]", "[pine:learn-reminder] outdated", 1)
+	if stale == string(data) {
+		t.Fatal("failed to mutate hook command")
+	}
+	os.WriteFile(settings, []byte(stale), 0o644)
+	if got := CheckClaudeHook(dir); got != StatusStale {
+		t.Fatalf("stale: %s", got)
+	}
+}
+
+func TestInstallSkillFileOverwriteAndEmpty(t *testing.T) {
+	dir := t.TempDir()
+	info := mustLookup(t, RecipeClaude)
+	opts := RenderOptions{}
+
+	status, err := InstallSkillFile(dir, RecipeInfo{}, opts)
+	if err != nil || status != "" {
+		t.Fatalf("empty SkillFile: status=%q err=%v", status, err)
+	}
+	if got := CheckSkillFile(dir, RecipeInfo{}, opts); got != StatusCurrent {
+		t.Fatalf("empty skill check: %s", got)
+	}
+	removed, err := RemoveSkillFile(dir, RecipeInfo{})
+	if err != nil || removed {
+		t.Fatalf("empty remove: %v %v", removed, err)
+	}
+	removed, err = RemoveSkillFile(dir, info)
+	if err != nil || removed {
+		t.Fatalf("remove missing: %v %v", removed, err)
+	}
+
+	status, err = InstallSkillFile(dir, info, opts)
+	if err != nil || status != "installed" {
+		t.Fatalf("first install: %q %v", status, err)
+	}
+	status, err = InstallSkillFile(dir, info, opts)
+	if err != nil || status != "current" {
+		t.Fatalf("idempotent: %q %v", status, err)
+	}
+
+	path := filepath.Join(dir, filepath.FromSlash(info.SkillFile))
+	os.WriteFile(path, []byte("stale"), 0o644)
+	status, err = InstallSkillFile(dir, info, opts)
+	if err != nil || status != "installed" {
+		t.Fatalf("overwrite stale: %q %v", status, err)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != RenderSkill(opts) {
+		t.Fatal("overwrite did not restore template")
+	}
+}
+
+func TestRemoveClaudeHookMissingAndUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	removed, err := RemoveClaudeHook(dir)
+	if err != nil || removed {
+		t.Fatalf("missing settings: %v %v", removed, err)
+	}
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(settings), 0o755)
+	os.WriteFile(settings, []byte("not-json"), 0o644)
+	removed, err = RemoveClaudeHook(dir)
+	if err != nil || removed {
+		t.Fatalf("unreadable: %v %v", removed, err)
+	}
+	os.WriteFile(settings, []byte(`{"model":"opus"}`), 0o644)
+	removed, err = RemoveClaudeHook(dir)
+	if err != nil || removed {
+		t.Fatalf("no hooks key: %v %v", removed, err)
+	}
+}
+
+func TestReadJSONObjectEdges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.json")
+	os.WriteFile(path, []byte("   \n"), 0o644)
+	doc, err := readJSONObject(path)
+	if err != nil || len(doc) != 0 {
+		t.Fatalf("empty file: %#v %v", doc, err)
+	}
+	os.WriteFile(path, []byte("null"), 0o644)
+	doc, err = readJSONObject(path)
+	if err != nil || doc == nil {
+		t.Fatalf("null json: %#v %v", doc, err)
+	}
+	_, err = readJSONObject(filepath.Join(dir, "missing.json"))
+	if err != nil {
+		t.Fatalf("missing: %v", err)
+	}
+	os.WriteFile(path, []byte("{"), 0o644)
+	if _, err := readJSONObject(path); err == nil {
+		t.Fatal("expected invalid JSON error")
+	}
+}
+
+func TestPineHookCommandSkipsBadEntries(t *testing.T) {
+	if pineHookCommand("not-a-map") != "" {
+		t.Fatal("non-map")
+	}
+	g := map[string]any{"hooks": []any{"x", map[string]any{"command": "no-sentinel"}}}
+	if pineHookCommand(g) != "" {
+		t.Fatal("no sentinel")
+	}
+}
