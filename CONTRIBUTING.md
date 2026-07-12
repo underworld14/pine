@@ -34,10 +34,12 @@ make dev                                 # terminal 2 (pine serve --dev)
 
 ## Before you open a PR
 
-Run the full check suite locally — CI runs the same:
+Run the full check suite locally — CI runs the same (CI also uses `-race`
+and fails if Go statement coverage is below **90%**):
 
 ```sh
 make test          # Go unit + integration tests
+make cover         # Go coverage report; exits 1 if total < 90%
 make lint          # go vet
 cd web && npm test # frontend (vitest)
 cd web && npx playwright install chromium && npm run test:e2e   # end-to-end

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop]
   pull_request:
 
 permissions:
@@ -19,7 +19,28 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go vet ./...
-      - run: go test -race ./...
+      - name: Go tests with coverage
+        run: go test -race ./... -coverprofile=coverage.out -covermode=atomic
+      - name: Enforce coverage ≥90%
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/{gsub(/%/,"",$NF); print $NF}')
+          echo "total coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if ((t+0) < 90) { printf("coverage %.1f%% is below 90%%\n", t); exit 1 } }'
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage.out
+          path: coverage.out
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   web:
     name: Frontend tests

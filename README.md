@@ -4,6 +4,8 @@
 
 [![CI](https://github.com/underworld14/pine/actions/workflows/ci.yml/badge.svg)](https://github.com/underworld14/pine/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/underworld14/pine?sort=semver)](https://github.com/underworld14/pine/releases)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](https://github.com/underworld14/pine/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/underworld14/pine/branch/main/graph/badge.svg)](https://codecov.io/gh/underworld14/pine)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/underworld14/pine)](https://goreportcard.com/report/github.com/underworld14/pine)
 

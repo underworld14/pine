@@ -1,4 +1,4 @@
-.PHONY: web build build-dev dev test test-go test-web e2e clean lint fmt
+.PHONY: web build build-dev dev test test-go cover test-web e2e clean lint fmt
 
 VERSION ?= 0.1.0-dev
 LDFLAGS := -X main.version=$(VERSION)
@@ -24,6 +24,13 @@ test: test-go
 test-go:
 	go test ./...
 
+# Local coverage gate (matches CI threshold). CI also runs with -race.
+cover:
+	go test ./... -coverprofile=coverage.out -covermode=atomic
+	@total=$$(go tool cover -func=coverage.out | awk '/^total:/{gsub(/%/,"",$$NF); print $$NF}'); \
+	echo "total coverage: $${total}%"; \
+	awk -v t="$$total" 'BEGIN { if ((t+0) < 90) { printf("coverage %.1f%% is below 90%%\n", t); exit 1 } }'
+
 test-web:
 	cd web && npm test
 
@@ -37,5 +44,5 @@ fmt:
 	gofmt -w .
 
 clean:
-	rm -f pine
+	rm -f pine coverage.out
 	rm -rf dist web/build web/.svelte-kit
