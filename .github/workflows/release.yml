@@ -36,13 +36,6 @@ jobs:
           path: coverage.out
           retention-days: 7
           if-no-files-found: ignore
-      - name: Upload coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v5
-        with:
-          files: coverage.out
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
 
       # Build the SvelteKit UI first so go:embed can bundle it into every binary.
       - uses: actions/setup-node@v4
@@ -61,3 +54,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # After goreleaser — codecov CLI leaves untracked binaries that fail its dirty check.
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
