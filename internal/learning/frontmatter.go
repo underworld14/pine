@@ -10,8 +10,8 @@ import (
 
 var knownKeys = map[string]bool{
 	"id": true, "scope": true, "tags": true, "ticket": true,
-	"source_agent": true, "supersedes": true, "superseded_by": true,
-	"cites": true, "created": true,
+	"component": true, "source_agent": true, "supersedes": true,
+	"superseded_by": true, "cites": true, "created": true,
 }
 
 // Parse reads a learning file. id is the canonical identifier from the filename.
@@ -60,6 +60,8 @@ func Parse(id string, raw []byte) *Learning {
 			}
 		case "ticket":
 			l.Ticket = strings.TrimSpace(val.Value)
+		case "component":
+			l.Component = strings.TrimSpace(val.Value)
 		case "source_agent":
 			l.SourceAgent = strings.ToLower(strings.TrimSpace(val.Value))
 		case "supersedes":
@@ -103,6 +105,9 @@ func (l *Learning) Serialize() []byte {
 	}
 	if l.Ticket != "" {
 		add("ticket", frontmatter.Scalar(l.Ticket))
+	}
+	if l.Component != "" {
+		add("component", frontmatter.Scalar(l.Component))
 	}
 	add("source_agent", frontmatter.Scalar(l.SourceAgent))
 	if l.Supersedes != "" {

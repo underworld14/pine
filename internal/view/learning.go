@@ -12,6 +12,7 @@ type Learning struct {
 	Scope        string       `json:"scope"`
 	Tags         []string     `json:"tags,omitempty"`
 	Ticket       string       `json:"ticket,omitempty"`
+	Component    string       `json:"component,omitempty"`
 	SourceAgent  string       `json:"source_agent"`
 	Supersedes   string       `json:"supersedes,omitempty"`
 	SupersededBy string       `json:"superseded_by,omitempty"`
@@ -36,6 +37,7 @@ func BuildLearning(l *learning.Learning) Learning {
 		Scope:       l.Scope,
 		Tags:        append([]string(nil), l.Tags...),
 		Ticket:      l.Ticket,
+		Component:   l.Component,
 		SourceAgent: l.SourceAgent,
 		Supersedes:  l.Supersedes,
 		Cites:       append([]string(nil), l.Cites...),

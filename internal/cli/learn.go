@@ -16,8 +16,8 @@ import (
 // newLearnCmd is registered from root.go.
 func newLearnCmd() *cobra.Command {
 	var (
-		scope, ticket, source, tagsCSV, supersedes, citesCSV, textFlag string
-		asJSON                                                         bool
+		scope, ticket, component, source, tagsCSV, supersedes, citesCSV, textFlag string
+		asJSON                                                                    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "learn [text]",
@@ -67,6 +67,7 @@ Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <i
 				Scope:       scope,
 				Tags:        tags,
 				Ticket:      ticketID,
+				Component:   component,
 				SourceAgent: source,
 				Supersedes:  sup,
 				Cites:       splitCSV(citesCSV),
@@ -84,17 +85,151 @@ Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <i
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global | ticket")
+	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global | ticket | component")
 	f.StringVar(&tagsCSV, "tags", "", "comma-separated tags")
 	f.StringVar(&ticket, "ticket", "", "ticket ID (required when --scope ticket)")
+	f.StringVar(&component, "component", "", "component path/name (required when --scope component)")
 	f.StringVar(&source, "source", learning.SourceManual, "source agent: claude-code|codex|cursor|gemini|manual")
 	f.StringVar(&supersedes, "supersedes", "", "learning ID this insight replaces")
 	f.StringVar(&citesCSV, "cites", "", "comma-separated repo-relative file paths this insight depends on")
 	f.StringVar(&textFlag, "text", "", `insight text, as an alternative to the positional argument (required if the insight is exactly "list", "search", or "show")`)
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 
-	cmd.AddCommand(newLearnListCmd(), newLearnSearchCmd(), newLearnShowCmd())
+	cmd.AddCommand(newLearnListCmd(), newLearnSearchCmd(), newLearnShowCmd(),
+		newLearnSupersedeCmd(), newLearnRmCmd())
 	return cmd
+}
+
+// newLearnSupersedeCmd captures a new learning that replaces an existing one,
+// inheriting the old learning's scope/ticket/component/tags unless overridden.
+func newLearnSupersedeCmd() *cobra.Command {
+	var (
+		scope, ticket, component, source, tagsCSV, citesCSV, textFlag string
+		asJSON                                                        bool
+	)
+	cmd := &cobra.Command{
+		Use:   "supersede <old-id> [new text]",
+		Short: "Replace an existing learning with a new insight",
+		Long: `Capture a new learning that supersedes <old-id>. The new learning inherits
+the old one's scope, ticket, component, and tags unless you override them with
+the corresponding flags. The old learning is retained on disk (for history) but
+hidden from list/search/context once superseded.
+
+Provide the new insight text as positional args or via --text.`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			oldID := normalizeID(args[0])
+			text := strings.TrimSpace(textFlag)
+			if text == "" && len(args) > 1 {
+				text = strings.TrimSpace(strings.Join(args[1:], " "))
+			}
+			if text == "" {
+				return fmt.Errorf("new insight text is required (positional or --text)")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			old, err := s.GetLearning(oldID)
+			if err != nil {
+				return err
+			}
+			// Inherit from the old learning unless the flag was explicitly set.
+			f := cmd.Flags()
+			if !f.Changed("scope") {
+				scope = old.Scope
+			}
+			if !f.Changed("ticket") {
+				ticket = old.Ticket
+			}
+			if !f.Changed("component") {
+				component = old.Component
+			}
+			tags := splitCSV(tagsCSV)
+			if !f.Changed("tags") {
+				tags = append([]string(nil), old.Tags...)
+			}
+			ticketID := ""
+			if ticket != "" {
+				ticketID = normalizeID(ticket)
+			}
+			l, err := s.CreateLearning(store.CreateLearningReq{
+				Text:        text,
+				Scope:       scope,
+				Tags:        tags,
+				Ticket:      ticketID,
+				Component:   component,
+				SourceAgent: source,
+				Supersedes:  oldID,
+				Cites:       splitCSV(citesCSV),
+			})
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				dto := view.BuildLearning(l)
+				dto.SupersededBy = ""
+				return writeJSON(cmd.OutOrStdout(), dto)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Captured %s (supersedes %s)\n", l.ID, oldID)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&scope, "scope", "", "override scope: global | ticket | component")
+	f.StringVar(&ticket, "ticket", "", "override ticket ID")
+	f.StringVar(&component, "component", "", "override component path/name")
+	f.StringVar(&source, "source", learning.SourceManual, "source agent: claude-code|codex|cursor|gemini|manual")
+	f.StringVar(&tagsCSV, "tags", "", "override tags (comma-separated)")
+	f.StringVar(&citesCSV, "cites", "", "comma-separated repo-relative file paths this insight depends on")
+	f.StringVar(&textFlag, "text", "", "insight text, as an alternative to positional args")
+	f.BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// newLearnRmCmd permanently deletes a learning file.
+func newLearnRmCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "rm <id>",
+		Short: "Delete a learning permanently",
+		Long: `Permanently remove a learning file from .pine/learnings/. Unlike supersede,
+this leaves no history. Prompts for confirmation unless --yes is given.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := normalizeID(args[0])
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			l, err := s.GetLearning(id)
+			if err != nil {
+				return err
+			}
+			if !yes {
+				fmt.Fprintf(cmd.OutOrStdout(), "Delete %s: %q? [y/N] ", id, truncate(strings.TrimSpace(l.Body), 50))
+				if !readYesLearn(cmd.InOrStdin()) {
+					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+					return nil
+				}
+			}
+			if err := s.DeleteLearning(id); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s\n", id)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt")
+	return cmd
+}
+
+// readYesLearn reads a single line and reports whether it is an affirmative.
+func readYesLearn(r io.Reader) bool {
+	var line string
+	_, _ = fmt.Fscanln(r, &line)
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "y" || line == "yes"
 }
 
 func newLearnListCmd() *cobra.Command {
@@ -204,7 +339,7 @@ first with --scope, --tags (AND), and --ticket.`,
 				return nil
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tSCOPE\tTICKET\tTAGS\tSCORE\tSTATUS\tBODY")
+			fmt.Fprintln(w, "ID\tSCOPE\tTARGET\tTAGS\tSCORE\tSTATUS\tBODY")
 			for _, h := range hits {
 				l := byID[h.ID]
 				if l == nil {
@@ -215,7 +350,7 @@ first with --scope, --tags (AND), and --ticket.`,
 					status = "stale"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.2f\t%s\t%s\n",
-					l.ID, l.Scope, l.Ticket, strings.Join(l.Tags, ","), h.Score, status, truncate(strings.TrimSpace(l.Body), 60))
+					l.ID, l.Scope, scopeTarget(l), strings.Join(l.Tags, ","), h.Score, status, truncate(strings.TrimSpace(l.Body), 60))
 			}
 			return w.Flush()
 		},
@@ -267,6 +402,9 @@ degraded note instead of being hidden.`,
 			if l.Ticket != "" {
 				fmt.Fprintf(w, "ticket: %s\n", l.Ticket)
 			}
+			if l.Component != "" {
+				fmt.Fprintf(w, "component: %s\n", l.Component)
+			}
 			if l.Supersedes != "" {
 				fmt.Fprintf(w, "supersedes: %s\n", l.Supersedes)
 			}
@@ -298,8 +436,8 @@ degraded note instead of being hidden.`,
 // learningFilterFlags is the filter flag set shared by `learn list` and
 // `learn search`.
 type learningFilterFlags struct {
-	scope, tagsCSV, ticket     string
-	includeSuper, includeStale bool
+	scope, tagsCSV, ticket, component string
+	includeSuper, includeStale        bool
 }
 
 func registerLearningFilterFlags(cmd *cobra.Command) *learningFilterFlags {
@@ -308,6 +446,7 @@ func registerLearningFilterFlags(cmd *cobra.Command) *learningFilterFlags {
 	f.StringVar(&lf.scope, "scope", "", "filter by scope")
 	f.StringVar(&lf.tagsCSV, "tags", "", "filter by tags (comma-separated, AND)")
 	f.StringVar(&lf.ticket, "ticket", "", "filter by ticket ID")
+	f.StringVar(&lf.component, "component", "", "filter by component path/name")
 	f.BoolVar(&lf.includeSuper, "include-superseded", false, "include learnings replaced by a newer one")
 	f.BoolVar(&lf.includeStale, "include-stale", false, "include learnings with a missing cited path")
 	return lf
@@ -322,6 +461,7 @@ func (lf *learningFilterFlags) build() store.LearningFilter {
 		Scope:             lf.scope,
 		Tags:              splitCSV(lf.tagsCSV),
 		Ticket:            ticket,
+		Component:         lf.component,
 		IncludeSuperseded: lf.includeSuper,
 		IncludeStale:      lf.includeStale,
 	}
@@ -365,14 +505,27 @@ func renderLearningTable(w io.Writer, items []*learning.Learning, s *store.Store
 	}
 	stale := s.CitationStaleIDs(items)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSCOPE\tTICKET\tTAGS\tSOURCE\tSTATUS\tBODY")
+	fmt.Fprintln(tw, "ID\tSCOPE\tTARGET\tTAGS\tSOURCE\tSTATUS\tBODY")
 	for _, l := range items {
 		status := ""
 		if stale[l.ID] {
 			status = "stale"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			l.ID, l.Scope, l.Ticket, strings.Join(l.Tags, ","), l.SourceAgent, status, truncate(strings.TrimSpace(l.Body), 60))
+			l.ID, l.Scope, scopeTarget(l), strings.Join(l.Tags, ","), l.SourceAgent, status, truncate(strings.TrimSpace(l.Body), 60))
 	}
 	_ = tw.Flush()
+}
+
+// scopeTarget returns the scope's referent for display: the ticket ID for
+// ticket-scoped learnings, the component for component-scoped, else "".
+func scopeTarget(l *learning.Learning) string {
+	switch l.Scope {
+	case learning.ScopeTicket:
+		return l.Ticket
+	case learning.ScopeComponent:
+		return l.Component
+	default:
+		return ""
+	}
 }

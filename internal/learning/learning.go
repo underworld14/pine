@@ -12,10 +12,11 @@ import (
 // ID prefix for all learnings.
 const Prefix = "LRN"
 
-// Scope values (v1: global and ticket only).
+// Scope values.
 const (
-	ScopeGlobal = "global"
-	ScopeTicket = "ticket"
+	ScopeGlobal    = "global"
+	ScopeTicket    = "ticket"
+	ScopeComponent = "component"
 )
 
 // Source agent values.
@@ -28,8 +29,9 @@ const (
 )
 
 var validScopes = map[string]bool{
-	ScopeGlobal: true,
-	ScopeTicket: true,
+	ScopeGlobal:    true,
+	ScopeTicket:    true,
+	ScopeComponent: true,
 }
 
 var validSourceAgents = map[string]bool{
@@ -49,9 +51,10 @@ type ExtraField struct {
 // Learning is a parsed learning file. Body is the insight text after frontmatter.
 type Learning struct {
 	ID          string // canonical, from filename (e.g. "LRN-001")
-	Scope       string // global | ticket
+	Scope       string // global | ticket | component
 	Tags        []string
 	Ticket      string // when scope == ticket
+	Component   string // when scope == component (a repo-relative path or module name)
 	SourceAgent string
 	Supersedes  string   // optional: ID of the learning this replaces
 	Cites       []string // optional: repo-relative paths this insight depends on

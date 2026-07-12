@@ -19,6 +19,7 @@ type CreateLearningReq struct {
 	Scope       string // default "global"
 	Tags        []string
 	Ticket      string
+	Component   string   // required when scope == component
 	SourceAgent string   // default "manual"
 	Supersedes  string   // optional learning ID this replaces
 	Cites       []string // optional repo-relative paths
@@ -50,9 +51,19 @@ func (s *Store) CreateLearning(req CreateLearningReq) (*learning.Learning, error
 			return nil, errors.New("--ticket is required when scope is ticket")
 		}
 	} else {
-		// A global learning carries no ticket reference, regardless of what
+		// A non-ticket learning carries no ticket reference, regardless of what
 		// the caller passed — scope is the single source of truth.
 		ticketID = ""
+	}
+	component := strings.TrimSpace(req.Component)
+	if scope == learning.ScopeComponent {
+		if component == "" {
+			return nil, errors.New("--component is required when scope is component")
+		}
+		component = filepath.ToSlash(component)
+	} else {
+		// Only component-scoped learnings carry a component reference.
+		component = ""
 	}
 	supersedes := strings.TrimSpace(req.Supersedes)
 	cites := normalizeCites(req.Cites)
@@ -102,6 +113,7 @@ func (s *Store) CreateLearning(req CreateLearningReq) (*learning.Learning, error
 		Scope:       scope,
 		Tags:        normalizeTags(req.Tags),
 		Ticket:      ticketID,
+		Component:   component,
 		SourceAgent: source,
 		Supersedes:  supersedes,
 		Cites:       cites,
@@ -244,6 +256,7 @@ type LearningFilter struct {
 	Scope             string
 	Tags              []string // all tags must be present (AND)
 	Ticket            string
+	Component         string
 	IncludeSuperseded bool // when false (default), hide entries that another learning supersedes
 	IncludeStale      bool // when false (default), hide entries with a missing cited path
 }
@@ -253,6 +266,9 @@ func (f LearningFilter) matches(l *learning.Learning) bool {
 		return false
 	}
 	if f.Ticket != "" && l.Ticket != f.Ticket {
+		return false
+	}
+	if f.Component != "" && l.Component != strings.TrimSpace(f.Component) {
 		return false
 	}
 	for _, want := range f.Tags {
@@ -324,6 +340,45 @@ func (s *Store) GetLearning(id string) (*learning.Learning, error) {
 		return nil, ErrNotFound
 	}
 	return cloneLearning(l), nil
+}
+
+// UpdateLearning applies mut to a copy of the learning and writes it atomically.
+// Mirrors Store.Update: degraded learnings are rejected (their frontmatter is not
+// understood, so a rewrite would lose data). mut runs under the write lock.
+func (s *Store) UpdateLearning(id string, mut func(*learning.Learning) error) (*learning.Learning, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.learningCache[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if cur.Degraded {
+		return nil, ErrDegraded
+	}
+	l := cloneLearning(cur)
+	if err := mut(l); err != nil {
+		return nil, err
+	}
+	if err := s.saveLearning(l); err != nil {
+		return nil, err
+	}
+	return cloneLearning(l), nil
+}
+
+// DeleteLearning removes a learning file and drops it from the cache. Mirrors
+// Store.Delete for tickets.
+func (s *Store) DeleteLearning(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.learningCache[id]; !ok {
+		return ErrNotFound
+	}
+	if err := os.Remove(s.learningPath(id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	delete(s.learningCache, id)
+	delete(s.learningHash, id)
+	return nil
 }
 
 func cloneLearning(l *learning.Learning) *learning.Learning {

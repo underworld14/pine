@@ -236,11 +236,11 @@ func TestParseFrontmatterNotMapping(t *testing.T) {
 }
 
 func TestValidScopeAndSourceAgent(t *testing.T) {
-	if !ValidScope("global") || !ValidScope("ticket") {
+	if !ValidScope("global") || !ValidScope("ticket") || !ValidScope("component") {
 		t.Error("valid scopes rejected")
 	}
-	if ValidScope("component") {
-		t.Error("component scope should not be valid in v1")
+	if ValidScope("module") {
+		t.Error("unknown scope should not be valid")
 	}
 	if !ValidSourceAgent("claude-code") || !ValidSourceAgent("manual") {
 		t.Error("valid source agents rejected")

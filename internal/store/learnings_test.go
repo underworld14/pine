@@ -372,3 +372,97 @@ func TestCreateLearningSupersedesSelfCycle(t *testing.T) {
 		t.Fatalf("expected cycle refusal, got %v", err)
 	}
 }
+
+func TestDeleteLearning(t *testing.T) {
+	s := scaffold(t)
+	l, err := s.CreateLearning(CreateLearningReq{Text: "to be removed"})
+	must(t, err)
+	path := filepath.Join(s.Root(), "learnings", l.ID+".md")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("file should exist before delete: %v", err)
+	}
+	if err := s.DeleteLearning(l.ID); err != nil {
+		t.Fatalf("DeleteLearning: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file should be gone after delete, stat err = %v", err)
+	}
+	if _, err := s.GetLearning(l.ID); err != ErrNotFound {
+		t.Errorf("GetLearning after delete = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteLearning("LRN-999"); err != ErrNotFound {
+		t.Errorf("delete of missing id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateLearning(t *testing.T) {
+	s := scaffold(t)
+	l, err := s.CreateLearning(CreateLearningReq{Text: "original", Tags: []string{"db"}})
+	must(t, err)
+	got, err := s.UpdateLearning(l.ID, func(m *learning.Learning) error {
+		m.Tags = []string{"db", "cache"}
+		m.Body = "\nrewritten body\n"
+		return nil
+	})
+	must(t, err)
+	if len(got.Tags) != 2 || got.Tags[1] != "cache" {
+		t.Errorf("tags = %v", got.Tags)
+	}
+	// Persisted to disk and reloadable.
+	reopened, err := Open(s.Root())
+	must(t, err)
+	rl, err := reopened.GetLearning(l.ID)
+	must(t, err)
+	if !strings.Contains(rl.Body, "rewritten body") {
+		t.Errorf("body not persisted: %q", rl.Body)
+	}
+	if _, err := s.UpdateLearning("LRN-999", func(*learning.Learning) error { return nil }); err != ErrNotFound {
+		t.Errorf("update of missing id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateLearningComponentScope(t *testing.T) {
+	s := scaffold(t)
+	l, err := s.CreateLearning(CreateLearningReq{
+		Text:      "the store is the single write path",
+		Scope:     learning.ScopeComponent,
+		Component: "internal/store",
+	})
+	must(t, err)
+	if l.Scope != learning.ScopeComponent || l.Component != "internal/store" {
+		t.Errorf("scope/component = %q/%q", l.Scope, l.Component)
+	}
+	// Round-trips through disk.
+	reopened, err := Open(s.Root())
+	must(t, err)
+	rl, err := reopened.GetLearning(l.ID)
+	must(t, err)
+	if rl.Component != "internal/store" {
+		t.Errorf("component not persisted: %q", rl.Component)
+	}
+	// Filterable by component.
+	got := reopened.ListLearnings(LearningFilter{Component: "internal/store"})
+	if len(got) != 1 || got[0].ID != l.ID {
+		t.Errorf("component filter returned %v", got)
+	}
+	if other := reopened.ListLearnings(LearningFilter{Component: "internal/cli"}); len(other) != 0 {
+		t.Errorf("component filter should exclude non-matching, got %v", other)
+	}
+}
+
+func TestCreateLearningComponentRequired(t *testing.T) {
+	s := scaffold(t)
+	_, err := s.CreateLearning(CreateLearningReq{Text: "x", Scope: learning.ScopeComponent})
+	if err == nil || !strings.Contains(err.Error(), "component") {
+		t.Fatalf("expected component-required error, got %v", err)
+	}
+}
+
+func TestCreateLearningNonComponentClearsComponent(t *testing.T) {
+	s := scaffold(t)
+	l, err := s.CreateLearning(CreateLearningReq{Text: "x", Scope: learning.ScopeGlobal, Component: "internal/store"})
+	must(t, err)
+	if l.Component != "" {
+		t.Errorf("global learning should not carry a component, got %q", l.Component)
+	}
+}
