@@ -18,6 +18,33 @@ var idPattern = regexp.MustCompile(`^([A-Z][A-Z0-9]*)-([0-9a-hj-km-np-tv-z]+)$`)
 // numericSuffix matches the sequential form's suffix (digits only).
 var numericSuffix = regexp.MustCompile(`^[0-9]+$`)
 
+// scanPattern is the unanchored counterpart of idPattern, used to pull ticket
+// IDs out of free text (commit messages, prose). The leading (?:^|[^A-Za-z0-9])
+// stands in for a word boundary RE2 can't express directly, so "aBUG-1" (an ID
+// glued to a preceding letter) is not mistaken for a reference.
+var scanPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]*-[0-9a-hj-km-np-tv-z]+)`)
+
+// ScanIDs extracts every well-formed ticket ID embedded in text, de-duplicated
+// and in first-seen order. Unlike ValidID (which validates a whole string), this
+// finds IDs surrounded by other characters.
+func ScanIDs(text string) []string {
+	matches := scanPattern.FindAllStringSubmatch(text, -1)
+	if matches == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range matches {
+		id := m[1]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
 // ValidID reports whether id is a well-formed ticket ID (either form).
 func ValidID(id string) bool {
 	return idPattern.MatchString(id)

@@ -39,6 +39,8 @@ func (s *stubGit) ShowFile(_ context.Context, rev, p string) ([]byte, bool) {
 	return nil, false
 }
 
+func (s *stubGit) Log(context.Context, string, string, int) []gitx.Commit { return nil }
+
 func mkTicket(id, status, updated string) string {
 	return "---\nid: " + id + "\ntitle: " + id + "\nstatus: " + status + "\nupdated: " + updated + "\n---\n\nbody\n"
 }

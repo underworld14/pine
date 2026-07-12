@@ -200,3 +200,48 @@ func TestBranchesNotARepo(t *testing.T) {
 		t.Errorf("ShowFile on non-repo should be ok=false")
 	}
 }
+
+func TestLogGrepAndPathUnion(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+
+	// Commit 1: touches the ticket file (no ID in message).
+	writeFile(t, dir, ".pine/tickets/BUG-001.md", "id: BUG-001\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "create ticket file")
+
+	// Commit 2: mentions the ID in the message but touches an unrelated file.
+	writeFile(t, dir, "src/fix.go", "package src\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "fix logic for BUG-001")
+
+	// Commit 3: unrelated entirely.
+	writeFile(t, dir, "README.md", "docs\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "docs")
+
+	c := New(dir)
+	ctx := context.Background()
+	got := c.Log(ctx, ".pine/tickets/BUG-001.md", "BUG-001", 30)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 commits (path + grep union), got %d: %+v", len(got), got)
+	}
+	// Newest first: the grep-matched fix commit precedes the file-create commit.
+	if got[0].Subject != "fix logic for BUG-001" || got[1].Subject != "create ticket file" {
+		t.Errorf("order/content = %+v", got)
+	}
+	// A non-matching query returns nothing.
+	if none := c.Log(ctx, ".pine/tickets/FEAT-999.md", "FEAT-999", 30); len(none) != 0 {
+		t.Errorf("expected no commits, got %+v", none)
+	}
+}
+
+func TestLogNotARepo(t *testing.T) {
+	gitAvailable(t)
+	c := New(t.TempDir())
+	if got := c.Log(context.Background(), "x", "y", 10); got != nil {
+		t.Errorf("non-repo Log should be nil, got %+v", got)
+	}
+}

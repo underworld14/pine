@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,11 @@ type Client interface {
 	// ShowFile returns the bytes of one file at rev. ok is false when the file
 	// or rev does not exist.
 	ShowFile(ctx context.Context, rev, path string) (content []byte, ok bool)
+
+	// Log returns commits that touch pathspec OR whose message contains grep
+	// (either may be empty), de-duplicated by commit and newest first, capped
+	// at limit.
+	Log(ctx context.Context, pathspec, grep string, limit int) []Commit
 }
 
 const maxChanges = 100
@@ -251,6 +257,47 @@ func (c *cli) ShowFile(ctx context.Context, rev, path string) ([]byte, bool) {
 	return out, true
 }
 
+// Log unions "commits touching pathspec" with "commits whose message matches
+// grep" (a literal, case-insensitive match), deduped by commit and newest
+// first. Both queries are bounded, and the result is capped at limit.
+func (c *cli) Log(ctx context.Context, pathspec, grep string, limit int) []Commit {
+	if limit <= 0 {
+		limit = 30
+	}
+	seen := map[string]bool{}
+	var out []Commit
+	base := []string{"log", "-n", strconv.Itoa(limit), "--format=%H%x1f%s%x1f%an%x1f%aI"}
+	collect := func(args ...string) {
+		res, err := c.run(ctx, append(append([]string{}, base...), args...)...)
+		if err != nil {
+			return
+		}
+		for _, ln := range strings.Split(res, "\n") {
+			if strings.TrimSpace(ln) == "" {
+				continue
+			}
+			parts := strings.Split(ln, "\x1f")
+			if len(parts) < 4 || seen[parts[0]] {
+				continue
+			}
+			seen[parts[0]] = true
+			when, _ := time.Parse(time.RFC3339, parts[3])
+			out = append(out, Commit{Hash: shortHash(parts[0]), Subject: parts[1], Author: parts[2], When: when})
+		}
+	}
+	if grep != "" {
+		collect("--grep="+grep, "--regexp-ignore-case", "--fixed-strings")
+	}
+	if pathspec != "" {
+		collect("--", pathspec)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].When.After(out[j].When) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
 func shortHash(h string) string {
 	if len(h) > 8 {
 		return h[:8]
@@ -269,3 +316,4 @@ func (nullClient) Files(context.Context) []string                          { ret
 func (nullClient) Branches(context.Context) []Branch                       { return nil }
 func (nullClient) ListTreeFiles(context.Context, string, string) []string  { return nil }
 func (nullClient) ShowFile(context.Context, string, string) ([]byte, bool) { return nil, false }
+func (nullClient) Log(context.Context, string, string, int) []Commit       { return nil }

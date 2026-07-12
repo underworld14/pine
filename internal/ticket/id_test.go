@@ -106,6 +106,36 @@ func TestFormatIDPadding(t *testing.T) {
 	}
 }
 
+func TestScanIDs(t *testing.T) {
+	cases := []struct {
+		text string
+		want []string
+	}{
+		{"fixes BUG-001 and FEAT-7f3k2a", []string{"BUG-001", "FEAT-7f3k2a"}},
+		{"BUG-001", []string{"BUG-001"}},
+		{"See EPIC-1000, EPIC-1000 again", []string{"EPIC-1000"}}, // dedup, first-seen order
+		{"nothing here", nil},
+		{"lowercase bug-1 is ignored", nil},
+		{"glued aBUG-1 not a ref", nil},                                // preceding letter blocks it
+		{"(BUG-2) [FEAT-3]", []string{"BUG-2", "FEAT-3"}},              // bracketed
+		{"BUG-1,FEAT-2;EPIC-3", []string{"BUG-1", "FEAT-2", "EPIC-3"}}, // punctuation separators
+		{"trailing BUG-001.", []string{"BUG-001"}},                     // trailing period excluded
+	}
+	for _, c := range cases {
+		got := ScanIDs(c.text)
+		if len(got) != len(c.want) {
+			t.Errorf("ScanIDs(%q) = %v, want %v", c.text, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("ScanIDs(%q) = %v, want %v", c.text, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestPriorityRank(t *testing.T) {
 	order := DefaultPriorities
 	if PriorityRank("critical", order) <= PriorityRank("low", order) {
