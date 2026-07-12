@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { workspace } from '$lib/workspace.svelte';
@@ -8,6 +9,11 @@
   import { priorityMeta, labelColor } from '$lib/ui-helpers';
   import { relTime, bytes } from '$lib/format';
   import { reconcileEditor } from '$lib/ticket-editor';
+  import {
+    insertAtCursor,
+    replaceAll,
+    uploadingPlaceholder
+  } from '$lib/insert-at-cursor';
   import TicketGraph from '$lib/components/TicketGraph.svelte';
 
   const id = $derived($page.params.id);
@@ -23,6 +29,7 @@
   let dirty = $derived(text !== baseBody);
   let conflict = $state<Ticket | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let textareaEl = $state<HTMLTextAreaElement | null>(null);
 
   // Load / rebase when the ticket identity or disk version changes.
   $effect(() => {
@@ -89,10 +96,41 @@
     saveTimer = setTimeout(() => { if (dirty) save(); }, 2000);
   }
 
+  async function startEdit(next: 'edit' | 'split' = 'edit') {
+    if (readOnly) return;
+    mode = next;
+    await tick();
+    textareaEl?.focus();
+  }
+
+  function finishEdit() {
+    if (dirty) save();
+    mode = 'preview';
+  }
+
+  function onPreviewDblClick(e: MouseEvent) {
+    if (readOnly) return;
+    const target = e.target as HTMLElement | null;
+    // Let links, checkboxes, and buttons keep their own interaction.
+    if (target?.closest('a, button, input, label, pre, code')) return;
+    e.preventDefault();
+    startEdit('edit');
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if (readOnly) return;
+    if (e.key === 'Escape' && mode !== 'preview') {
+      e.preventDefault();
+      finishEdit();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); mode = mode === 'edit' ? 'preview' : mode === 'preview' ? 'split' : 'edit'; }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      if (mode === 'preview') startEdit('edit');
+      else if (mode === 'edit') startEdit('split');
+      else finishEdit();
+    }
   }
 
   function reloadFromDisk() {
@@ -162,24 +200,60 @@
   }
 
   async function uploadFiles(files: File[]) {
-    if (!files.length || readOnly) return;
+    if (!files.length || readOnly || !id) return;
+    // Ensure we have an editor surface so placeholders land in the body.
+    const fromPreview = mode === 'preview';
+    if (fromPreview) await startEdit('edit');
+    const names = files.map((f, i) => f.name || `paste-${i + 1}.png`);
+    const placeholders = names.map((n) => uploadingPlaceholder(n));
+    const el = !fromPreview && textareaEl && document.activeElement === textareaEl ? textareaEl : null;
+    let value = text;
+    // From preview, append at end; otherwise insert at caret.
+    let caret = fromPreview ? value.length : (el?.selectionStart ?? value.length);
+    for (const ph of placeholders) {
+      const pad = caret > 0 && value[caret - 1] !== '\n' ? '\n\n' : '';
+      const r = insertAtCursor(value, pad + ph, { selectionStart: caret, selectionEnd: caret });
+      value = r.value;
+      caret = r.caret;
+    }
+    text = value;
+    await tick();
+    textareaEl?.focus();
+    textareaEl?.setSelectionRange(caret, caret);
+
     try {
       const results = await api.upload(id, files, { opId: workspace.beginOp() });
+      let next = text;
+      for (let i = 0; i < placeholders.length; i++) {
+        const r = results[i];
+        if (r && !r.error && r.markdown) next = replaceAll(next, placeholders[i], r.markdown);
+        else next = replaceAll(next, placeholders[i], '');
+      }
+      text = next.replace(/\n{3,}/g, '\n\n');
       const ok = results.filter((r) => !r.error);
       if (ok.length) {
-        const md = ok.map((r) => r.markdown).join('\n');
-        text = text.trimEnd() + '\n\n' + md + '\n';
         await save();
         const saved = ok.reduce((a, r) => a + (r.originalBytes - r.finalBytes), 0);
         toasts.push(saved > 0 ? `Attached · saved ${bytes(saved)}` : 'Attached', 'success');
+      } else {
+        toasts.push('Upload failed', 'error');
       }
-    } catch { toasts.push('Upload failed', 'error'); }
+    } catch {
+      let cleaned = text;
+      for (const ph of placeholders) cleaned = replaceAll(cleaned, ph, '');
+      text = cleaned.replace(/\n{3,}/g, '\n\n');
+      toasts.push('Upload failed', 'error');
+    }
   }
 
   function onPaste(e: ClipboardEvent) {
+    if (readOnly) return;
     const imgs: File[] = [];
     for (const it of e.clipboardData?.items ?? []) {
-      if (it.type.startsWith('image/')) { const f = it.getAsFile(); if (f) imgs.push(f); }
+      if (it.type.startsWith('image/')) {
+        const f = it.getAsFile();
+        if (f) imgs.push(new File([f], f.name || `paste-${imgs.length + 1}.png`, { type: f.type }));
+      }
     }
     if (imgs.length) { e.preventDefault(); uploadFiles(imgs); }
   }
@@ -251,21 +325,49 @@
 
     <div class="editor-head">
       {#if !readOnly}
-        <div class="modes">
-          {#each ['preview', 'split', 'edit'] as m}
-            <button class:active={mode === m} onclick={() => (mode = m as typeof mode)}>{m}</button>
-          {/each}
-        </div>
-        {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
+        {#if mode === 'preview'}
+          <span class="edit-hint">Double-click to edit · <kbd>⌘E</kbd></span>
+        {:else}
+          <button class="done" onclick={finishEdit}>Done</button>
+          <div class="modes">
+            <button class:active={mode === 'edit'} onclick={() => startEdit('edit')}>Edit</button>
+            <button class:active={mode === 'split'} onclick={() => startEdit('split')}>Split</button>
+          </div>
+          {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
+          <span class="edit-hint dim"><kbd>Esc</kbd> to preview</span>
+        {/if}
       {/if}
     </div>
 
-    <div class="editor" class:split={mode === 'split' && !readOnly}>
+    <div
+      class="editor"
+      class:split={mode === 'split' && !readOnly}
+      class:editing={mode !== 'preview' && !readOnly}
+      class:previewing={mode === 'preview' || readOnly}
+    >
       {#if mode !== 'preview' && !readOnly}
-        <textarea bind:value={text} oninput={onEdit} spellcheck="false"></textarea>
+        <textarea
+          bind:this={textareaEl}
+          bind:value={text}
+          oninput={onEdit}
+          spellcheck="false"
+          placeholder="# Description&#10;&#10;Write the ticket body in Markdown…"
+        ></textarea>
       {/if}
       {#if mode !== 'edit' || readOnly}
-        <div class="preview" onchange={onChecklistChange}>{@html readOnly || dirty ? preview.replaceAll('<input ', '<input disabled ') : preview}</div>
+        <div
+          class="preview"
+          class:editable={!readOnly && mode === 'preview'}
+          role={!readOnly && mode === 'preview' ? 'button' : undefined}
+          tabindex={!readOnly && mode === 'preview' ? 0 : undefined}
+          title={!readOnly && mode === 'preview' ? 'Double-click to edit' : undefined}
+          ondblclick={onPreviewDblClick}
+          onkeydown={(e) => {
+            if (readOnly || mode !== 'preview') return;
+            if (e.key === 'Enter') { e.preventDefault(); startEdit('edit'); }
+          }}
+          onchange={onChecklistChange}
+        >{@html readOnly || dirty ? preview.replaceAll('<input ', '<input disabled ') : preview}</div>
       {/if}
     </div>
 
@@ -303,8 +405,20 @@
   .title { flex: 1; font-size: 20px; font-weight: 650; background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; }
   .title:hover, .title:focus { border-color: var(--color-border); outline: none; }
   .spacer { flex: 0; }
-  .ghost { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 10px; font-size: 12px; }
+  .ghost {
+    background: var(--color-surface-2);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    transition-property: scale, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .ghost:active:not(:disabled) { scale: 0.96; }
   .ghost.danger { color: var(--color-danger); }
+  :root[data-theme='light'] .ghost { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06); }
   .ro-banner {
     display: flex; align-items: center; gap: 10px; margin: 12px 0;
     padding: 8px 12px; font-size: 13px; border-radius: 8px;
@@ -328,27 +442,149 @@
   .epic-summary { font-size: 12px; color: var(--color-dim); margin: -4px 0 12px; }
   .conflict { background: color-mix(in srgb, var(--color-warn) 12%, var(--color-surface)); border: 1px solid var(--color-warn); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
   .conflict button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
-  .editor-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
-  .modes { display: flex; border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; }
-  .modes button { padding: 3px 12px; background: var(--color-surface-2); border: none; font-size: 12px; text-transform: capitalize; }
+  .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 28px; }
+  .edit-hint { color: var(--color-dim); font-size: 12px; }
+  .edit-hint.dim { margin-left: auto; opacity: 0.75; }
+  .done {
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    transition-property: scale, background-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .done:active { scale: 0.96; }
+  .modes { display: flex; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; }
+  .modes button {
+    padding: 4px 12px;
+    background: var(--color-surface-2);
+    border: none;
+    font-size: 12px;
+    min-height: 28px;
+    transition-property: background-color, color, scale;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .modes button:active { scale: 0.96; }
   .modes button.active { background: var(--color-accent-soft); color: var(--color-accent); }
+  :root[data-theme='light'] .modes { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06); }
   .dirty { color: var(--color-warn); font-size: 11px; }
-  .editor { border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; min-height: 300px; }
+  .editor {
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 280px;
+    background: var(--color-surface);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    transition-property: box-shadow, background-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .editor.previewing { background: transparent; }
+  .editor.previewing:hover { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.13); }
+  .editor.editing { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent); }
+  :root[data-theme='light'] .editor {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.06),
+      0 1px 2px -1px rgba(0, 0, 0, 0.06),
+      0 2px 4px 0 rgba(0, 0, 0, 0.04);
+  }
+  :root[data-theme='light'] .editor.previewing:hover {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 1px 2px -1px rgba(0, 0, 0, 0.08),
+      0 2px 4px 0 rgba(0, 0, 0, 0.06);
+  }
   .editor.split { display: grid; grid-template-columns: 1fr 1fr; }
-  textarea { width: 100%; min-height: 300px; padding: 14px; background: var(--color-bg); border: none; outline: none; resize: vertical; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
-  .editor.split textarea { border-right: 1px solid var(--color-border); }
-  .preview { padding: 14px 18px; font-size: 14px; line-height: 1.6; overflow: auto; }
-  .preview :global(h1) { font-size: 18px; margin: 0.6em 0 0.3em; }
-  .preview :global(h2) { font-size: 15px; color: var(--color-dim); margin: 0.8em 0 0.3em; }
+  textarea {
+    width: 100%;
+    min-height: 280px;
+    padding: 16px 18px;
+    background: var(--color-surface);
+    border: none;
+    outline: none;
+    resize: vertical;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.65;
+    letter-spacing: 0.01em;
+  }
+  .editor.split textarea {
+    border-right: 1px solid var(--color-border);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .preview {
+    padding: 16px 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    overflow: auto;
+    text-wrap: pretty;
+  }
+  .preview.editable { cursor: text; }
+  .preview.editable:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+  .preview :global(h1) {
+    font-size: 15px;
+    font-weight: 650;
+    color: var(--color-dim);
+    margin: 1.1em 0 0.35em;
+    letter-spacing: 0.02em;
+    text-wrap: balance;
+  }
+  .preview :global(h1:first-child) { margin-top: 0; }
+  .preview :global(h2) {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-dim);
+    margin: 1em 0 0.3em;
+    text-wrap: balance;
+  }
+  .preview :global(p) { margin: 0.35em 0 0.7em; }
+  .preview :global(ul), .preview :global(ol) { margin: 0.35em 0 0.7em; padding-left: 1.35em; }
+  .preview :global(li) { margin: 0.2em 0; }
   .preview :global(code) { font-family: var(--font-mono); background: var(--color-surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
-  .preview :global(pre) { background: var(--color-surface); padding: 12px; border-radius: 8px; overflow: auto; }
-  .preview :global(img) { max-width: 100%; border-radius: 8px; }
+  .preview :global(pre) { background: var(--color-surface-2); padding: 12px; border-radius: 8px; overflow: auto; }
+  .preview :global(pre code) { background: none; padding: 0; }
+  .preview :global(img) {
+    max-width: 100%;
+    border-radius: 8px;
+    outline: 1px solid rgba(255, 255, 255, 0.1);
+    outline-offset: -1px;
+  }
+  :root[data-theme='light'] .preview :global(img) { outline-color: rgba(0, 0, 0, 0.1); }
   .preview :global(a) { color: var(--color-accent); }
   .attachments { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
   .att { display: flex; flex-direction: column; gap: 4px; width: 140px; }
-  .imgbtn { padding: 0; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: none; }
-  .att img, .att video { width: 140px; height: 90px; object-fit: cover; display: block; }
+  .imgbtn {
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    overflow: hidden;
+    background: none;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    transition-property: scale, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .imgbtn:active { scale: 0.96; }
+  :root[data-theme='light'] .imgbtn { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06); }
+  .att img, .att video {
+    width: 140px;
+    height: 90px;
+    object-fit: cover;
+    display: block;
+    outline: 1px solid rgba(255, 255, 255, 0.1);
+    outline-offset: -1px;
+  }
+  :root[data-theme='light'] .att img,
+  :root[data-theme='light'] .att video { outline-color: rgba(0, 0, 0, 0.1); }
   .aname { font-size: 10px; color: var(--color-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lightbox { position: fixed; inset: 0; background: rgb(0 0 0 / 0.8); display: grid; place-items: center; z-index: 90; padding: 40px; }
-  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px; }
 </style>

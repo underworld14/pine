@@ -1,18 +1,28 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { ui } from '$lib/ui.svelte';
   import { workspace } from '$lib/workspace.svelte';
   import { api } from '$lib/api';
   import { toasts } from '$lib/toast.svelte';
-  import { goto } from '$app/navigation';
+  import {
+    insertAtCursor,
+    removeUploadPlaceholder,
+    rewriteStagedUploads,
+    uploadPlaceholder
+  } from '$lib/insert-at-cursor';
+
+  type Staged = { key: string; file: File };
 
   let type = $state('bug');
   let title = $state('');
   let description = $state('');
   let priority = $state('medium');
   let labelsRaw = $state('');
-  let staged = $state<File[]>([]);
+  let staged = $state<Staged[]>([]);
   let saving = $state(false);
   let titleEl = $state<HTMLInputElement | null>(null);
+  let descEl = $state<HTMLTextAreaElement | null>(null);
+  let keySeq = 0;
 
   // Object-URL previews for staged image files (client-side blobs; work anywhere,
   // including a VS Code webview). Cached per File so we create each URL once.
@@ -28,7 +38,7 @@
   }
   // Revoke URLs for files that are no longer staged (remove / reset / submit).
   $effect(() => {
-    const current = new Set(staged);
+    const current = new Set(staged.map((s) => s.file));
     for (const [file, url] of urlCache) {
       if (!current.has(file)) {
         URL.revokeObjectURL(url);
@@ -46,6 +56,7 @@
       priority = 'medium';
       labelsRaw = '';
       staged = [];
+      keySeq = 0;
       queueMicrotask(() => titleEl?.focus());
     }
   });
@@ -57,21 +68,86 @@
     return `# Description\n\n${d}\n\n# Steps to Reproduce\n\n# Expected\n\n# Actual\n`;
   }
 
+  function nextKey(): string {
+    keySeq += 1;
+    return `u${keySeq}`;
+  }
+
+  function padBefore(value: string, pos: number): string {
+    if (pos <= 0) return '';
+    return value[pos - 1] === '\n' ? '' : '\n\n';
+  }
+
+  async function insertImagePlaceholders(items: Staged[]) {
+    const images = items.filter((s) => s.file.type.startsWith('image/'));
+    if (!images.length) return;
+    const el = descEl && document.activeElement === descEl ? descEl : null;
+    let value = description;
+    let caret = el?.selectionStart ?? value.length;
+    for (const item of images) {
+      const snippet = padBefore(value, caret) + uploadPlaceholder(item.key, item.file.name);
+      const r = insertAtCursor(value, snippet, { selectionStart: caret, selectionEnd: caret });
+      value = r.value;
+      caret = r.caret;
+    }
+    description = value;
+    await tick();
+    if (descEl) {
+      descEl.focus();
+      descEl.setSelectionRange(caret, caret);
+    }
+  }
+
+  function stageFiles(list: FileList | File[], opts: { insertMarkdown: boolean }) {
+    const arr = Array.from(list).filter((f) => f && f.size >= 0);
+    if (!arr.length) return;
+    const added: Staged[] = [];
+    for (const f of arr) {
+      const name = f.name || `paste-${staged.length + added.length + 1}.png`;
+      const file = f.name ? f : new File([f], name, { type: f.type });
+      added.push({ key: nextKey(), file });
+    }
+    staged = [...staged, ...added];
+    if (opts.insertMarkdown) void insertImagePlaceholders(added);
+  }
+
   async function submit() {
     if (!title.trim() || saving) return;
     saving = true;
     try {
       const labels = labelsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      const snapshot = [...staged];
+      let body = composeBody();
       const t = await workspace.create({
         type,
         title: title.trim(),
         priority,
         labels,
         status: ui.modalDefaults.status,
-        body: composeBody()
+        body
       });
-      if (staged.length) {
-        try { await api.upload(t.id, staged, { opId: workspace.beginOp() }); } catch { toasts.push('Attachment upload failed', 'error'); }
+      if (snapshot.length) {
+        try {
+          const results = await api.upload(
+            t.id,
+            snapshot.map((s) => s.file),
+            { opId: workspace.beginOp() }
+          );
+          const next = rewriteStagedUploads(
+            body,
+            snapshot.map((s) => s.key),
+            results
+          );
+          if (next !== body) await workspace.patch(t.id, { body: next });
+          body = next;
+        } catch {
+          let cleaned = body;
+          for (const item of snapshot) cleaned = removeUploadPlaceholder(cleaned, item.key);
+          if (cleaned !== body) {
+            try { await workspace.patch(t.id, { body: cleaned }); } catch { /* ignore */ }
+          }
+          toasts.push('Attachment upload failed', 'error');
+        }
       }
       ui.closeModal();
       toasts.push(`${t.id} created`, 'success', { href: `/tickets/${t.id}`, action: 'View' });
@@ -87,32 +163,38 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
   }
 
-  function addFiles(list: FileList | File[]) {
-    const arr = Array.from(list).filter((f) => f && f.size >= 0);
-    if (arr.length) staged = [...staged, ...arr];
-  }
-
   function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const imgs: File[] = [];
     for (const it of items) {
       if (it.type.startsWith('image/')) {
         const f = it.getAsFile();
-        if (f) staged = [...staged, new File([f], f.name || `paste-${staged.length + 1}.png`, { type: f.type })];
+        if (f) imgs.push(new File([f], f.name || `paste-${staged.length + imgs.length + 1}.png`, { type: f.type }));
       }
     }
+    if (!imgs.length) return;
+    e.preventDefault();
+    stageFiles(imgs, { insertMarkdown: true });
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
     const fs = e.dataTransfer?.files;
-    if (fs) addFiles(fs);
+    if (fs?.length) stageFiles(fs, { insertMarkdown: true });
   }
 
   function onPick(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
-    if (input.files) addFiles(input.files);
+    if (input.files?.length) stageFiles(input.files, { insertMarkdown: true });
     input.value = '';
+  }
+
+  function removeStaged(i: number) {
+    const item = staged[i];
+    if (!item) return;
+    description = removeUploadPlaceholder(description, item.key);
+    staged = staged.filter((_, j) => j !== i);
   }
 </script>
 
@@ -126,7 +208,7 @@
         <span class="hint"><kbd>Esc</kbd> cancel · <kbd>⌘↵</kbd> create</span>
       </div>
       <input bind:this={titleEl} bind:value={title} class="title" placeholder="Title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
-      <textarea bind:value={description} class="desc" rows="3" placeholder="Description (optional)"></textarea>
+      <textarea bind:this={descEl} bind:value={description} class="desc" rows="3" placeholder="Description (optional)"></textarea>
       <div class="controls">
         <div class="seg">
           {#each ['low', 'medium', 'high', 'critical'] as p}
@@ -137,13 +219,13 @@
       </div>
       {#if staged.length}
         <div class="staged">
-          {#each staged as f, i}
-            <div class="thumb" class:image={previewUrl(f)}>
-              {#if previewUrl(f)}
-                <img class="preview" src={previewUrl(f)} alt={f.name} />
+          {#each staged as s, i}
+            <div class="thumb" class:image={previewUrl(s.file)}>
+              {#if previewUrl(s.file)}
+                <img class="preview" src={previewUrl(s.file)} alt={s.file.name} />
               {/if}
-              <span class="name">{f.name}</span>
-              <button class="rm" onclick={() => (staged = staged.filter((_, j) => j !== i))} aria-label="Remove">×</button>
+              <span class="name">{s.file.name}</span>
+              <button class="rm" onclick={() => removeStaged(i)} aria-label="Remove">×</button>
             </div>
           {/each}
         </div>
