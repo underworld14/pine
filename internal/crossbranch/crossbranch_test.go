@@ -232,7 +232,7 @@ func TestBestDateAndRunBounded(t *testing.T) {
 	var ran atomic.Int32
 	runBounded(ctx, 20, 4, func(i int) { ran.Add(1) })
 	// Cancelled: may run 0 or a few before noticing; just ensure it returns.
-	_ = ran
+	_ = ran.Load()
 }
 
 func TestComputeDisabledAndDefaults(t *testing.T) {
