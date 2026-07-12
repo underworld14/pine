@@ -112,3 +112,86 @@ func TestDoctorWarnsUnconfiguredMergeDriver(t *testing.T) {
 		t.Errorf("doctor should warn about the unconfigured merge driver:\n%s", out)
 	}
 }
+
+func TestConflictMarkersNoTrailingNewline(t *testing.T) {
+	got := conflictMarkers([]byte("ours"), []byte("theirs"))
+	s := string(got)
+	if !strings.Contains(s, "ours\n=======\n") || !strings.Contains(s, "theirs\n>>>>>>>") {
+		t.Fatalf("%s", s)
+	}
+}
+
+func TestRunMergeDriverMissingOurs(t *testing.T) {
+	dir := t.TempDir()
+	theirs := writeTmp(t, dir, "theirs", "---\nid: BUG-001\ntitle: T\n---\n")
+	_, err := runMergeDriver(filepath.Join(dir, "missing-base"), filepath.Join(dir, "missing-ours"), theirs, "BUG-001.md")
+	if err == nil {
+		t.Fatal("expected error for missing ours")
+	}
+}
+
+func TestMergeDriverCmdConflictExit(t *testing.T) {
+	dir := t.TempDir()
+	base := writeTmp(t, dir, "base", "")
+	ours := writeTmp(t, dir, "ours", "degraded ours\n")
+	theirs := writeTmp(t, dir, "theirs", "degraded theirs\n")
+	cmd := newMergeDriverCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{base, ours, theirs, "BUG-001.md"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "merge conflict") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSetupMergeRemoveWhenMissing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+	run(t, dir, "init", "--skip-agents")
+	// Remove without install should still succeed (nothing to strip).
+	if _, err := run(t, dir, "setup", "merge", "--remove"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunMergeDriverMissingTheirs(t *testing.T) {
+	dir := t.TempDir()
+	ours := writeTmp(t, dir, "ours", "---\nid: BUG-001\ntitle: T\nstatus: todo\ncreated: 2026-07-10T00:00:00Z\nupdated: 2026-07-10T00:00:00Z\n---\n")
+	_, err := runMergeDriver(ours, ours, filepath.Join(dir, "no-theirs"), "BUG-001.md")
+	if err == nil {
+		t.Fatal("expected missing theirs error")
+	}
+}
+
+func TestMergeDriverCmdClean(t *testing.T) {
+	dir := t.TempDir()
+	base := writeTmp(t, dir, "base", "---\nid: BUG-001\ntitle: T\nstatus: todo\nlabels:\n    - a\ncreated: 2026-07-10T00:00:00Z\nupdated: 2026-07-10T00:00:00Z\n---\nbody\n")
+	ours := writeTmp(t, dir, "ours", "---\nid: BUG-001\ntitle: T\nstatus: doing\nlabels:\n    - a\ncreated: 2026-07-10T00:00:00Z\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n")
+	theirs := writeTmp(t, dir, "theirs", "---\nid: BUG-001\ntitle: T\nstatus: todo\nlabels:\n    - a\ncreated: 2026-07-10T00:00:00Z\nupdated: 2026-07-10T12:00:00Z\n---\nbody\n")
+	cmd := newMergeDriverCmd()
+	cmd.SetArgs([]string{base, ours, theirs, "BUG-001.md"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureGitAttributesIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	changed, err := ensureGitAttributes(dir)
+	if err != nil || !changed {
+		t.Fatalf("first: %v %v", changed, err)
+	}
+	changed, err = ensureGitAttributes(dir)
+	if err != nil || changed {
+		t.Fatalf("second should be no-op: %v %v", changed, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, ".gitattributes"))
+	if strings.Count(string(data), "merge=pine") != 1 {
+		t.Fatalf("%s", data)
+	}
+}

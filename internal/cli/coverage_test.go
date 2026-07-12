@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -406,7 +410,7 @@ func TestSetupListPrintRemove(t *testing.T) {
 
 func TestLearnSearchTextOutput(t *testing.T) {
 	dir := initRepo(t)
-	run(t, dir, "learn", "UNIQUE_TEXT_SEARCH_TERM about caching")
+	run(t, dir, "learn", "UNIQUE_TEXT_SEARCH_TERM about caching", "--legacy-lrn")
 
 	noHits, err := run(t, dir, "learn", "search", "nothing_matches_this_zzz")
 	if err != nil {
@@ -429,7 +433,7 @@ func TestLearnListAndSearchTicketFilter(t *testing.T) {
 	dir := initRepo(t)
 	run(t, dir, "create", "--type", "bug", "--title", "x") // BUG-001
 	run(t, dir, "learn", "ticket-scoped filter test", "--scope", "ticket", "--ticket", "BUG-001")
-	run(t, dir, "learn", "global one")
+	run(t, dir, "learn", "global one", "--legacy-lrn")
 
 	listOut, err := run(t, dir, "learn", "list", "--ticket", "BUG-001")
 	if err != nil {
@@ -477,5 +481,86 @@ func TestDoctorCLIWarningAndError(t *testing.T) {
 	_, err = run(t, dir, "doctor")
 	if err == nil || !strings.Contains(err.Error(), "problem") {
 		t.Fatalf("expected doctor to report an error, got %v", err)
+	}
+}
+
+func TestOptimizeRecompressesPNG(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "create", "--type", "bug", "--title", "Has shot"); err != nil {
+		t.Fatal(err)
+	}
+	// Build a large PNG that Process will convert to a differently-named WebP.
+	img := image.NewRGBA(image.Rect(0, 0, 2400, 1200))
+	for y := 0; y < 1200; y++ {
+		for x := 0; x < 2400; x++ {
+			img.Set(x, y, color.RGBA{uint8(x), uint8(y), 90, 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	attDir := filepath.Join(dir, ".pine", "attachments", "BUG-001")
+	if err := os.MkdirAll(attDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pngPath := filepath.Join(attDir, "Screen Shot.png")
+	if err := os.WriteFile(pngPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Reference in ticket body so update path rewrites the name.
+	raw, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	updated := string(raw) + "\n# Attachments\n- ../attachments/BUG-001/Screen Shot.png\n"
+	os.WriteFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"), []byte(updated), 0o644)
+
+	dry, err := run(t, dir, "optimize", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dry, "Screen Shot.png") || !strings.Contains(dry, "would save") {
+		t.Fatalf("dry-run:\n%s", dry)
+	}
+	if _, err := os.Stat(pngPath); err != nil {
+		t.Fatal("dry-run must not delete source")
+	}
+
+	out, err := run(t, dir, "optimize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "saved") || !strings.Contains(out, "file(s)") {
+		t.Fatalf("optimize:\n%s", out)
+	}
+	if _, err := os.Stat(pngPath); !os.IsNotExist(err) {
+		t.Fatalf("png should be replaced, err=%v", err)
+	}
+	entries, _ := os.ReadDir(attDir)
+	foundWebP := false
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".webp") {
+			foundWebP = true
+		}
+	}
+	if !foundWebP {
+		t.Fatalf("expected webp in %v", entries)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	if strings.Contains(string(body), "Screen Shot.png") {
+		t.Fatalf("ticket body should rewrite attachment name:\n%s", body)
+	}
+}
+
+func TestOptimizeSkipsNonImages(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "x")
+	attDir := filepath.Join(dir, ".pine", "attachments", "BUG-001")
+	os.MkdirAll(attDir, 0o755)
+	os.WriteFile(filepath.Join(attDir, "notes.txt"), []byte("hi"), 0o644)
+	out, err := run(t, dir, "optimize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Nothing to optimize.") {
+		t.Fatalf("%s", out)
 	}
 }

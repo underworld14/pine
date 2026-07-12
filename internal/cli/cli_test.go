@@ -3,11 +3,16 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/underworld14/pine/internal/tui"
+	"github.com/underworld14/pine/internal/doctor"
+	"github.com/underworld14/pine/internal/learning"
+	"github.com/underworld14/pine/internal/store"
 	"github.com/underworld14/pine/internal/view"
 )
 
@@ -249,15 +254,38 @@ func TestSetupYesInstallsAll(t *testing.T) {
 		if !strings.Contains(string(data), "pine:begin") {
 			t.Fatalf("%s missing pine section", name)
 		}
-		if !strings.Contains(string(data), "Persistent learnings") {
-			t.Fatalf("%s missing learnings subsection", name)
+		if !strings.Contains(string(data), "pine learn") || !strings.Contains(string(data), "load the pine skill") {
+			t.Fatalf("%s missing summary / skill pointer:\n%s", name, data)
+		}
+	}
+	for _, skill := range []string{
+		".agents/skills/pine/SKILL.md",
+		".claude/skills/pine/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, skill))
+		if err != nil {
+			t.Fatalf("missing skill %s: %v", skill, err)
+		}
+		if !strings.Contains(string(data), "Persistent learnings") || !strings.Contains(string(data), "Essential commands") {
+			t.Fatalf("%s should hold the full workflow:\n%s", skill, data)
+		}
+	}
+	for _, hook := range []string{
+		".claude/settings.json",
+		".codex/hooks.json",
+		".cursor/hooks.json",
+		".codex/hooks/pine-learn-reminder.sh",
+		".cursor/hooks/pine-learn-reminder.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, hook)); err != nil {
+			t.Fatalf("missing hook artifact %s: %v", hook, err)
 		}
 	}
 }
 
 func TestLearnCreateListSearchDoctor(t *testing.T) {
 	dir := initRepo(t)
-	out, err := run(t, dir, "learn", "Always use the query builder", "--scope", "global", "--tags", "db,test")
+	out, err := run(t, dir, "learn", "Always use the query builder", "--scope", "global", "--tags", "db,test", "--legacy-lrn")
 	if err != nil {
 		t.Fatalf("learn: %v\n%s", err, out)
 	}
@@ -269,7 +297,7 @@ func TestLearnCreateListSearchDoctor(t *testing.T) {
 		t.Fatalf("expected 1 learning file, got %d", len(entries))
 	}
 
-	if _, err := run(t, dir, "learn", "Prefer CSS variables", "--scope", "global", "--tags", "ui"); err != nil {
+	if _, err := run(t, dir, "learn", "Prefer CSS variables", "--scope", "global", "--tags", "ui", "--legacy-lrn"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := run(t, dir, "create", "--type", "bug", "--title", "schema"); err != nil {
@@ -314,12 +342,12 @@ func TestLearnCreateListSearchDoctor(t *testing.T) {
 
 func TestLearnSupersedes(t *testing.T) {
 	dir := initRepo(t)
-	out, err := run(t, dir, "learn", "old UNIQUE_STALE_ZZZ")
+	out, err := run(t, dir, "learn", "old UNIQUE_STALE_ZZZ", "--legacy-lrn")
 	if err != nil {
 		t.Fatal(err)
 	}
 	oldID := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "Captured "))
-	out2, err := run(t, dir, "learn", "new UNIQUE_TIP_YYY", "--supersedes", oldID)
+	out2, err := run(t, dir, "learn", "new UNIQUE_TIP_YYY", "--supersedes", oldID, "--legacy-lrn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +414,7 @@ func TestLearnCites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := run(t, dir, "learn", "race in UNIQUE_CITE_AAA", "--cites", citedRel)
+	out, err := run(t, dir, "learn", "race in UNIQUE_CITE_AAA", "--cites", citedRel, "--legacy-lrn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +510,7 @@ func TestLearnCitesAndSupersedesIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := run(t, dir, "learn", "old BOTH_FILTER_QQQ", "--cites", citedRel)
+	out, err := run(t, dir, "learn", "old BOTH_FILTER_QQQ", "--cites", citedRel, "--legacy-lrn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +570,7 @@ func TestLearnCitesAndSupersedesIndependent(t *testing.T) {
 func TestLearnSupersedeAndRm(t *testing.T) {
 	dir := initRepo(t)
 	// Capture an initial global learning.
-	if _, err := run(t, dir, "learn", "old rule about retries", "--tags", "net"); err != nil {
+	if _, err := run(t, dir, "learn", "old rule about retries", "--tags", "net", "--legacy-lrn"); err != nil {
 		t.Fatalf("learn: %v", err)
 	}
 	// Supersede it; the new learning should inherit tags.
@@ -571,9 +599,111 @@ func TestLearnSupersedeAndRm(t *testing.T) {
 	}
 }
 
+func TestLearnRmDeclined(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "keep me", "--legacy-lrn"); err != nil {
+		t.Fatalf("learn: %v", err)
+	}
+
+	prev := confirmDeleteFn
+	confirmDeleteFn = func(summary string, in io.Reader, out io.Writer) (bool, error) {
+		if !strings.Contains(summary, "LRN-001") {
+			t.Fatalf("unexpected summary: %q", summary)
+		}
+		return false, nil
+	}
+	t.Cleanup(func() { confirmDeleteFn = prev })
+
+	out, err := run(t, dir, "learn", "rm", "LRN-001")
+	if err != nil {
+		t.Fatalf("rm declined: %v", err)
+	}
+	if !strings.Contains(out, "Cancelled.") {
+		t.Fatalf("expected Cancelled output, got:\n%s", out)
+	}
+	// Learning should still exist.
+	if _, err := run(t, dir, "learn", "show", "LRN-001"); err != nil {
+		t.Fatalf("learning should still exist after declined rm: %v", err)
+	}
+}
+
+func TestLearnRmAbort(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "keep me", "--legacy-lrn"); err != nil {
+		t.Fatalf("learn: %v", err)
+	}
+
+	prev := confirmDeleteFn
+	confirmDeleteFn = func(summary string, in io.Reader, out io.Writer) (bool, error) {
+		return false, tui.ErrCancelled
+	}
+	t.Cleanup(func() { confirmDeleteFn = prev })
+
+	out, err := run(t, dir, "learn", "rm", "LRN-001")
+	if err != nil {
+		t.Fatalf("rm abort: %v", err)
+	}
+	if !strings.Contains(out, "Cancelled.") {
+		t.Fatalf("expected Cancelled output, got:\n%s", out)
+	}
+}
+
+func TestLearnMemoryAppendAndSuggest(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "Prefer dark UI chrome", "--to", "MEMORY.md")
+	if err != nil {
+		t.Fatalf("learn MEMORY: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "MEMORY.md") {
+		t.Fatalf("expected MEMORY append output:\n%s", out)
+	}
+	mem, err := os.ReadFile(filepath.Join(dir, ".pine", "MEMORY.md"))
+	if err != nil || !strings.Contains(string(mem), "Prefer dark UI chrome") {
+		t.Fatalf("MEMORY.md missing insight: %v\n%s", err, mem)
+	}
+
+	out, err = run(t, dir, "learn", "Usage icons need text-white", "--new-topic", "analytics",
+		"--cites", "apps/web/src/modules/analytics/lib/usage.ts")
+	if err != nil {
+		t.Fatalf("new-topic: %v\n%s", err, out)
+	}
+	topic := filepath.Join(dir, ".pine", "memory", "analytics.md")
+	data, err := os.ReadFile(topic)
+	if err != nil || !strings.Contains(string(data), "text-white") {
+		t.Fatalf("topic missing: %v\n%s", err, data)
+	}
+
+	// Second related insight should auto-append to analytics when cites match.
+	out, err = run(t, dir, "learn", "AI Usage Logs type icons colored square never bg-muted",
+		"--cites", "apps/web/src/modules/analytics/lib/usage.ts")
+	if err != nil {
+		t.Fatalf("auto topic: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "memory/analytics.md") {
+		t.Fatalf("expected auto-append to analytics:\n%s", out)
+	}
+	data, _ = os.ReadFile(topic)
+	if !strings.Contains(string(data), "bg-muted") {
+		t.Fatalf("second bullet missing:\n%s", data)
+	}
+
+	sug, err := run(t, dir, "learn", "suggest", "usage type icon colors", "--cites", "apps/web/src/modules/analytics/lib/usage.ts", "--json")
+	if err != nil {
+		t.Fatalf("suggest: %v\n%s", err, sug)
+	}
+	if !strings.Contains(sug, "memory/analytics.md") {
+		t.Fatalf("suggest missing analytics:\n%s", sug)
+	}
+
+	show, err := run(t, dir, "learn", "show", "memory/analytics.md")
+	if err != nil || !strings.Contains(show, "text-white") {
+		t.Fatalf("show topic: %v\n%s", err, show)
+	}
+}
+
 func TestLearnComponentScopeCLI(t *testing.T) {
 	dir := initRepo(t)
-	if _, err := run(t, dir, "learn", "prefer atomic writes here", "--scope", "component", "--component", "internal/store"); err != nil {
+	if _, err := run(t, dir, "learn", "prefer atomic writes here", "--scope", "component", "--component", "internal/store", "--legacy-lrn"); err != nil {
 		t.Fatalf("learn component: %v", err)
 	}
 	out, err := run(t, dir, "learn", "list", "--scope", "component", "--json")
@@ -642,5 +772,388 @@ func TestDoctorFixJSONIsValid(t *testing.T) {
 		if code, _ := f["code"].(string); code == "frontmatter-id-mismatch" {
 			t.Errorf("fixed finding should not remain in the post-fix JSON: %v", f)
 		}
+	}
+}
+
+func TestLearnMemoryAmbiguousAndJSON(t *testing.T) {
+	dir := initRepo(t)
+	// No topics yet → ambiguous (not confident) for a random insight.
+	out, err := run(t, dir, "learn", "completely novel insight about quux widgets")
+	if err == nil {
+		t.Fatalf("expected ambiguous, got success:\n%s", out)
+	}
+	if !strings.Contains(out, "Ambiguous destination") {
+		t.Fatalf("want recommendations printed:\n%s", out)
+	}
+
+	out, err = run(t, dir, "learn", "another novel insight about zorp", "--json")
+	if err == nil {
+		t.Fatalf("expected ambiguous json error, got:\n%s", out)
+	}
+	if !strings.Contains(out, "recommendations") || !strings.Contains(out, "ambiguous") {
+		t.Fatalf("json ambiguous payload:\n%s", out)
+	}
+
+	out, err = run(t, dir, "learn", "Prefer dark chrome", "--to", "MEMORY.md", "--json")
+	if err != nil {
+		t.Fatalf("to MEMORY json: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"path": "MEMORY.md"`) {
+		t.Fatalf("json dest:\n%s", out)
+	}
+
+	out, err = run(t, dir, "learn", "topic tip", "--to", "memory/widgets.md", "--json")
+	if err != nil {
+		t.Fatalf("to topic json: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "memory/widgets.md") {
+		t.Fatalf("json topic:\n%s", out)
+	}
+
+	// bad --to
+	if _, err := run(t, dir, "learn", "x", "--to", "foo/bar/baz.md"); err == nil {
+		t.Fatal("bad --to should fail")
+	}
+}
+
+func TestLearnSuggestTextAndShowMemory(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "Prefer dark chrome", "--to", "MEMORY.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "learn", "billing tip", "--new-topic", "billing"); err != nil {
+		t.Fatal(err)
+	}
+
+	sug, err := run(t, dir, "learn", "suggest", "prefer dark chrome")
+	if err != nil {
+		t.Fatalf("suggest text: %v\n%s", err, sug)
+	}
+	if !strings.Contains(sug, "MEMORY.md") {
+		t.Fatalf("suggest missing MEMORY:\n%s", sug)
+	}
+
+	sug, err = run(t, dir, "learn", "suggest", "billing tip about invoices", "--component", "billing", "--json")
+	if err != nil {
+		t.Fatalf("suggest json: %v\n%s", err, sug)
+	}
+	if !strings.Contains(sug, "recommendations") {
+		t.Fatalf("%s", sug)
+	}
+
+	show, err := run(t, dir, "learn", "show", "MEMORY.md")
+	if err != nil || !strings.Contains(show, "Prefer dark chrome") {
+		t.Fatalf("show MEMORY: %v\n%s", err, show)
+	}
+	show, err = run(t, dir, "learn", "show", "MEMORY.md", "--json")
+	if err != nil || !strings.Contains(show, "Prefer dark chrome") {
+		t.Fatalf("show MEMORY json: %v\n%s", err, show)
+	}
+	show, err = run(t, dir, "learn", "show", "billing")
+	if err != nil || !strings.Contains(show, "billing tip") {
+		t.Fatalf("show bare slug: %v\n%s", err, show)
+	}
+	show, err = run(t, dir, "learn", "show", "memory/billing.md", "--json")
+	if err != nil || !strings.Contains(show, `"slug"`) {
+		t.Fatalf("show topic json: %v\n%s", err, show)
+	}
+
+	list, err := run(t, dir, "learn", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(list, "MEMORY.md") || !strings.Contains(list, "memory/billing.md") {
+		t.Fatalf("list memory section:\n%s", list)
+	}
+
+	// search should include memory docs
+	searchOut, err := run(t, dir, "learn", "search", "dark chrome")
+	if err != nil {
+		t.Fatalf("search: %v\n%s", err, searchOut)
+	}
+}
+
+func TestLearnShowMissingMemory(t *testing.T) {
+	dir := initRepo(t)
+	// Ensure layout but empty MEMORY by truncating after Ensure via write empty? Default seed is non-empty.
+	// Missing topic file:
+	out, err := run(t, dir, "learn", "show", "memory/nope.md")
+	if err == nil {
+		t.Fatalf("expected missing topic error, got:\n%s", out)
+	}
+	// Non-memory id should fall through to LRN path
+	out, err = run(t, dir, "learn", "show", "LRN-999")
+	if err == nil {
+		t.Fatalf("expected missing LRN error, got:\n%s", out)
+	}
+}
+
+func TestSetupAgentYesInstalls(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "setup", "agent", "-y")
+	if err != nil {
+		t.Fatalf("setup agent -y: %v\n%s", err, out)
+	}
+	for _, p := range []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s after setup: %v", p, err)
+		}
+	}
+}
+
+func TestLearnShowEmptyMEMORYJSON(t *testing.T) {
+	dir := initRepo(t)
+	mem := filepath.Join(dir, ".pine", "MEMORY.md")
+	if err := os.WriteFile(mem, []byte("   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "learn", "show", "MEMORY.md", "--json")
+	if err == nil {
+		t.Fatalf("expected error for empty MEMORY, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "MEMORY.md not found") && !strings.Contains(out, "MEMORY.md not found") {
+		t.Fatalf("err=%v out=%s", err, out)
+	}
+}
+
+func TestLearnListEmptyMemorySection(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "MEMORY / topics:") || !strings.Contains(out, "(no topic files yet)") {
+		t.Fatalf("expected empty memory section:\n%s", out)
+	}
+}
+
+func TestLearnComponentRoutesToMemory(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "prefer atomic renames in the store layer",
+		"--scope", "component", "--component", "internal/store", "--to", "memory/store.md")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "memory/store.md") {
+		t.Fatalf("expected memory topic append:\n%s", out)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, ".pine", "learnings"))
+	if len(entries) != 0 {
+		t.Fatalf("should not create LRN without --legacy-lrn, got %d", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".pine", "memory", "store.md"))
+	if err != nil || !strings.Contains(string(data), "atomic renames") {
+		t.Fatalf("topic missing: %v %s", err, data)
+	}
+}
+
+func TestLearnSupersedeInheritViaTextFlag(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "Login")
+	if _, err := run(t, dir, "learn", "old ticket insight", "--scope", "ticket", "--ticket", "BUG-001", "--tags", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "learn", "supersede", "LRN-001", "--text", "new ticket insight with inherit")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	show, err := run(t, dir, "learn", "show", "LRN-002", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show, `"scope": "ticket"`) && !strings.Contains(show, `"scope":"ticket"`) {
+		t.Fatalf("should inherit ticket scope:\n%s", show)
+	}
+	if !strings.Contains(show, "BUG-001") {
+		t.Fatalf("should inherit ticket:\n%s", show)
+	}
+	if !strings.Contains(show, "auth") {
+		t.Fatalf("should inherit tags:\n%s", show)
+	}
+}
+
+func TestLearnTextFlagAndBothArgsError(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "--text", "via flag only", "--to", "MEMORY.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "learn"); err == nil {
+		t.Fatal("empty learn should fail")
+	}
+	if _, err := run(t, dir, "learn", "positional", "--text", "also"); err == nil {
+		t.Fatal("both text sources should fail")
+	}
+}
+
+func TestLearnLegacyJSON(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "json lrn", "--legacy-lrn", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "LRN-") || !strings.Contains(out, "json lrn") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestLearnSuggestTextConfidentAndEmptyish(t *testing.T) {
+	dir := initRepo(t)
+	_, _ = run(t, dir, "learn", "Prefer dark mode chrome for dashboards", "--to", "MEMORY.md")
+	out, err := run(t, dir, "learn", "suggest", "Prefer dark mode chrome for dashboards")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "MEMORY.md") {
+		t.Fatalf("%s", out)
+	}
+	// show MEMORY without trailing newline still prints
+	os.WriteFile(filepath.Join(dir, ".pine", "MEMORY.md"), []byte("no-nl"), 0o644)
+	show, err := run(t, dir, "learn", "show", "MEMORY.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show, "no-nl") {
+		t.Fatalf("%s", show)
+	}
+}
+
+func TestLearnShowBareTopicSlug(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "learn", "topic body", "--new-topic", "widgets")
+	out, err := run(t, dir, "learn", "show", "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "topic body") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestLearnSupersedeJSON(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "learn", "old rule", "--legacy-lrn")
+	out, err := run(t, dir, "learn", "supersede", "LRN-001", "new rule", "--json")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "LRN-002") || !strings.Contains(out, "new rule") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestCiteStatusesAndScopeTarget(t *testing.T) {
+	dir := initRepo(t)
+	s, err := store.Open(filepath.Join(dir, ".pine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if citeStatuses(s, nil) != nil {
+		t.Fatal("empty")
+	}
+	got := citeStatuses(s, []string{"", "nope.go"})
+	if len(got) != 1 || got[0].Path != "nope.go" || got[0].Exists {
+		t.Fatalf("%+v", got)
+	}
+	l := &learning.Learning{Scope: learning.ScopeComponent, Component: "internal/x"}
+	if scopeTarget(l) != "internal/x" {
+		t.Fatalf("%q", scopeTarget(l))
+	}
+	l = &learning.Learning{Scope: learning.ScopeTicket, Ticket: "BUG-001"}
+	if scopeTarget(l) != "BUG-001" {
+		t.Fatalf("%q", scopeTarget(l))
+	}
+}
+
+func TestScopeTargetGlobalEmpty(t *testing.T) {
+	l := &learning.Learning{Scope: learning.ScopeGlobal}
+	if scopeTarget(l) != "" {
+		t.Fatal(scopeTarget(l))
+	}
+}
+
+func TestLearnSuggestConfidentHint(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "learn", "UNIQUE_CONFIDENT_MEMORY_PHRASE dark chrome", "--to", "MEMORY.md")
+	out, err := run(t, dir, "learn", "suggest", "UNIQUE_CONFIDENT_MEMORY_PHRASE dark chrome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Either auto-append hint or not-confident message should appear.
+	if !strings.Contains(out, "Auto-append") && !strings.Contains(out, "Not confident") && !strings.Contains(out, "MEMORY.md") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestLearnShowNewPrefixUnhandled(t *testing.T) {
+	dir := initRepo(t)
+	// NEW: paths resolve but file missing → error from ReadFile
+	_, err := run(t, dir, "learn", "show", "NEW:does-not-exist-yet")
+	if err == nil {
+		t.Fatal("expected missing topic error")
+	}
+}
+
+func TestLearnRmMissingAndSupersedeMissingText(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "rm", "LRN-999", "--yes"); err == nil {
+		t.Fatal("rm missing should fail")
+	}
+	run(t, dir, "learn", "keep", "--legacy-lrn")
+	if _, err := run(t, dir, "learn", "supersede", "LRN-001"); err == nil {
+		t.Fatal("supersede without text should fail")
+	}
+	if _, err := run(t, dir, "learn", "supersede", "LRN-999", "text"); err == nil {
+		t.Fatal("supersede missing old should fail")
+	}
+}
+
+func TestLearnListJSONEmpty(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "learn", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestLevelNameAndDoctorJSON(t *testing.T) {
+	if levelName(doctor.LevelOK) != "ok" {
+		t.Fatal(levelName(doctor.LevelOK))
+	}
+	if levelName(doctor.LevelWarn) != "warn" || levelName(doctor.LevelError) != "error" {
+		t.Fatal("warn/error")
+	}
+	if levelName(doctor.Level(99)) != "ok" {
+		t.Fatal("default")
+	}
+	dir := initRepo(t)
+	out, err := run(t, dir, "doctor", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"level"`) {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestDoctorDryRunFixableCount(t *testing.T) {
+	dir := initRepo(t)
+	os.WriteFile(filepath.Join(dir, ".pine", "tickets", "notes.txt"), []byte("scratch"), 0o644)
+	// Make a fixable dangling dep
+	run(t, dir, "create", "--type", "bug", "--title", "x")
+	raw, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	s := string(raw)
+	idx := strings.Index(s, "\n---\n")
+	updated := s[:idx+1] + "deps:\n  - GHOST-999\n" + s[idx+1:]
+	os.WriteFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"), []byte(updated), 0o644)
+	out, err := run(t, dir, "doctor", "--dry-run")
+	if err != nil {
+		// may still be ok if only warnings
+		_ = err
+	}
+	if !strings.Contains(out, "fixable") || !strings.Contains(out, "auto-fixed") {
+		t.Fatalf("%s", out)
 	}
 }

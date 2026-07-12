@@ -11,6 +11,7 @@ import (
 	"github.com/underworld14/pine/internal/gitx"
 	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 func scaffold(t *testing.T) *store.Store {
@@ -327,5 +328,100 @@ func TestFormatLearningsOverflowNote(t *testing.T) {
 	block := FormatLearningsBlock(ls, 5)
 	if !strings.Contains(block, "+5 more") {
 		t.Fatalf("expected overflow note:\n%s", block)
+	}
+}
+
+func TestCodeListAndExcerptHelpers(t *testing.T) {
+	if got := codeList(nil, 3); got != "" {
+		t.Fatalf("empty: %q", got)
+	}
+	got := codeList([]string{"a.go", "b.go", "c.go", "d.go"}, 2)
+	if got != "`a.go`, `b.go`, … (+2 more)" {
+		t.Fatalf("codeList=%q", got)
+	}
+	if got := excerpt("# Description\n\n\nFirst real line.\n\nSecond.\n"); got != "First real line." {
+		t.Fatalf("excerpt desc=%q", got)
+	}
+	if got := excerpt("\n\n# ignored\nBare line\n"); got != "Bare line" {
+		t.Fatalf("excerpt bare=%q", got)
+	}
+	if got := excerpt("\n\n# only\n"); got != "" {
+		t.Fatalf("excerpt empty=%q", got)
+	}
+}
+
+func TestWriteAcceptanceBlockEdges(t *testing.T) {
+	var b strings.Builder
+	writeAcceptanceBlock(&b, "# Description\nno ac\n")
+	if b.Len() != 0 {
+		t.Fatalf("no section: %q", b.String())
+	}
+	writeAcceptanceBlock(&b, "# Acceptance Criteria\n\njust prose\n")
+	if b.Len() != 0 {
+		t.Fatalf("no checkboxes: %q", b.String())
+	}
+	writeAcceptanceBlock(&b, "# Acceptance Criteria\n- [x] done\n- [ ] todo\n")
+	if !strings.Contains(b.String(), "(1/2)") {
+		t.Fatalf("progress: %q", b.String())
+	}
+}
+
+func TestAppendLearningsBlockEdges(t *testing.T) {
+	if got := appendLearningsBlock("out", nil, 0); got != "out" {
+		t.Fatalf("%q", got)
+	}
+	ls := []*learning.Learning{{ID: "LRN-001", Scope: "global", Body: "\ntip\n"}}
+	got := appendLearningsBlock("body-no-nl", ls, 0)
+	if !strings.HasPrefix(got, "body-no-nl\n\n") || !strings.Contains(got, "tip") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestExportWriteTicketMeta(t *testing.T) {
+	s := scaffold(t)
+	parent, err := s.Create(store.CreateReq{Type: "epic", Title: "Parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Create(store.CreateReq{
+		Type: "bug", Title: "Child", Parent: parent.ID,
+		Labels: []string{"ui"}, Body: "details here",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(child.ID, func(tt *ticket.Ticket) error {
+		tt.Deps = []string{parent.ID}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	md := ExportMarkdown(s)
+	if !strings.Contains(md, "labels: ui") || !strings.Contains(md, "parent: "+parent.ID) {
+		t.Fatalf("export meta:\n%s", md)
+	}
+	if !strings.Contains(md, "deps: "+parent.ID) {
+		t.Fatalf("export deps:\n%s", md)
+	}
+	if !strings.Contains(md, "details here") {
+		t.Fatalf("export body:\n%s", md)
+	}
+}
+
+func TestContextIncludesTestingSection(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(store.CreateReq{Type: "bug", Title: "In QA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(tk.ID, func(tt *ticket.Ticket) error {
+		tt.Status = ticket.StatusTesting
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	md := Context(s, fakeGit(), time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
+	if !strings.Contains(md, "## In Testing") || !strings.Contains(md, tk.ID) {
+		t.Fatalf("%s", md)
 	}
 }

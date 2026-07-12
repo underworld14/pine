@@ -1,8 +1,10 @@
 package search
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func buildIndex(t *testing.T) *Index {
@@ -112,5 +114,72 @@ func TestSearchEmptyQuery(t *testing.T) {
 	idx := buildIndex(t)
 	if hits := idx.Search("", Filter{}, 10); hits != nil {
 		t.Errorf("empty query should return nil, got %+v", hits)
+	}
+}
+
+func TestBuildAsyncThenSearch(t *testing.T) {
+	idx, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	if idx.Ready() {
+		t.Fatal("Ready should be false before BuildAsync completes")
+	}
+
+	// > batchSize (200) so BuildAsync flushes mid-loop, then a final partial batch.
+	docs := make([]Doc, 0, 210)
+	for i := 0; i < 209; i++ {
+		docs = append(docs, Doc{
+			ID:    "DOC-" + strconv.Itoa(i),
+			Title: "filler document",
+			Body:  "unrelated content",
+			Kind:  KindMemory,
+		})
+	}
+	docs = append(docs, Doc{
+		ID: "memory/widgets.md", Title: "Widget styling", Body: "always use text-white on colored squares",
+		Kind: KindMemory,
+	})
+
+	idx.BuildAsync(docs)
+	deadline := time.Now().Add(5 * time.Second)
+	for !idx.Ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("BuildAsync did not become Ready")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	hits := idx.Search("widget", Filter{Kind: KindMemory}, 10)
+	if !hasID(hits, "memory/widgets.md") {
+		t.Fatalf("expected memory doc in KindMemory filter results: %+v", hits)
+	}
+
+	idx.Delete("memory/widgets.md")
+	hits = idx.Search("widget", Filter{Kind: KindMemory}, 10)
+	if hasID(hits, "memory/widgets.md") {
+		t.Fatalf("deleted doc should not appear: %+v", hits)
+	}
+}
+
+func TestSearchFilterKindMemory(t *testing.T) {
+	idx, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	idx.Upsert(Doc{ID: "BUG-1", Title: "widget bug", Body: "broken widget", Kind: KindTicket, Type: "BUG"})
+	idx.Upsert(Doc{ID: "MEMORY.md", Title: "Project memory", Body: "widget preference", Kind: KindMemory})
+	idx.ready.Store(true)
+
+	memHits := idx.Search("widget", Filter{Kind: KindMemory}, 10)
+	if !hasID(memHits, "MEMORY.md") || hasID(memHits, "BUG-1") {
+		t.Fatalf("KindMemory filter: %+v", memHits)
+	}
+	ticketHits := idx.Search("widget", Filter{Kind: KindTicket}, 10)
+	if !hasID(ticketHits, "BUG-1") || hasID(ticketHits, "MEMORY.md") {
+		t.Fatalf("KindTicket filter: %+v", ticketHits)
 	}
 }

@@ -466,3 +466,27 @@ func TestCreateLearningNonComponentClearsComponent(t *testing.T) {
 		t.Errorf("global learning should not carry a component, got %q", l.Component)
 	}
 }
+
+func TestLearningFilterMatchesEdges(t *testing.T) {
+	l := &learning.Learning{Scope: "ticket", Ticket: "BUG-001", Component: "internal/x", Tags: []string{"A"}}
+	f := LearningFilter{Scope: "global"}
+	if f.matches(l) {
+		t.Fatal("scope mismatch")
+	}
+	f = LearningFilter{Ticket: "BUG-002"}
+	if f.matches(l) {
+		t.Fatal("ticket mismatch")
+	}
+	f = LearningFilter{Component: "other"}
+	if f.matches(l) {
+		t.Fatal("component mismatch")
+	}
+	f = LearningFilter{Tags: []string{"a", "missing"}}
+	if f.matches(l) {
+		t.Fatal("tag AND")
+	}
+	f = LearningFilter{Scope: "ticket", Ticket: "BUG-001", Component: "internal/x", Tags: []string{"a"}}
+	if !f.matches(l) {
+		t.Fatal("should match")
+	}
+}

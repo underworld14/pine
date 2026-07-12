@@ -119,3 +119,57 @@ func TestFindCyclesThreeNode(t *testing.T) {
 		}
 	}
 }
+
+func TestWouldCycleEmptyIDs(t *testing.T) {
+	if WouldCycle(nil, "", "LRN-A") != nil || WouldCycle(nil, "LRN-A", "") != nil {
+		t.Fatal("empty ids")
+	}
+}
+
+func TestSupersededByEmpty(t *testing.T) {
+	if SupersededBy(nil, nil, "LRN-X") != "" {
+		t.Fatal("expected empty")
+	}
+}
+
+func TestTipMaxDepthAndSelfLoop(t *testing.T) {
+	// Reverse edge pointing to self via empty pickNewest path: kid list with empty string.
+	rev := map[string][]string{"LRN-A": {""}}
+	if tip := Tip(rev, nil, "LRN-A"); tip != "LRN-A" {
+		t.Fatalf("tip=%q", tip)
+	}
+}
+
+func TestPickNewestEmptyAndNewerTieBreak(t *testing.T) {
+	if pickNewest(nil, nil) != "" {
+		t.Fatal("empty")
+	}
+	created := map[string]time.Time{"LRN-A": tAt(1), "LRN-B": tAt(1)}
+	if !newer("LRN-B", "LRN-A", created) {
+		t.Fatal("equal time should prefer higher ID")
+	}
+	if newer("LRN-A", "LRN-B", created) {
+		t.Fatal("A should not be newer than B on tie")
+	}
+}
+
+func TestFindCyclesNoCycleAndSeenBreak(t *testing.T) {
+	edges := map[string]string{"LRN-A": "LRN-B"} // B not in edges
+	if cyc := FindCycles(edges); len(cyc) != 0 {
+		t.Fatalf("%v", cyc)
+	}
+	// Two separate cycles sorted by first member
+	edges = map[string]string{
+		"LRN-Z": "LRN-Y",
+		"LRN-Y": "LRN-Z",
+		"LRN-B": "LRN-A",
+		"LRN-A": "LRN-B",
+	}
+	cyc := FindCycles(edges)
+	if len(cyc) != 2 {
+		t.Fatalf("%v", cyc)
+	}
+	if cyc[0][0] > cyc[1][0] {
+		t.Fatalf("cycles not sorted: %v", cyc)
+	}
+}

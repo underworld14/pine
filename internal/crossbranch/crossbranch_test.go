@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -206,5 +207,139 @@ func TestComputeIgnoresNonTicketFilesAndInvalidIDs(t *testing.T) {
 	got := Compute(context.Background(), g, "main", nil, baseOpts(now))
 	if len(got) != 1 || got[0].Ticket.ID != "FEAT-3d4e5f" {
 		t.Errorf("should only pick the valid ticket: %+v", got)
+	}
+}
+
+func TestBestDateAndRunBounded(t *testing.T) {
+	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	earlier := now.Add(-time.Hour)
+	got := bestDate([]candidate{{branchAt: earlier}, {branchAt: now}, {branchAt: earlier}})
+	if !got.Equal(now) {
+		t.Fatalf("%v", got)
+	}
+	if !bestDate(nil).IsZero() {
+		t.Fatal("empty")
+	}
+
+	runBounded(context.Background(), 0, 4, func(int) { t.Fatal("should not run") })
+	var n atomic.Int32
+	runBounded(context.Background(), 5, 0, func(i int) { n.Add(1) })
+	if n.Load() != 5 {
+		t.Fatalf("workers=0 → 1 worker, got %d", n.Load())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var ran atomic.Int32
+	runBounded(ctx, 20, 4, func(i int) { ran.Add(1) })
+	// Cancelled: may run 0 or a few before noticing; just ensure it returns.
+	_ = ran
+}
+
+func TestComputeDisabledAndDefaults(t *testing.T) {
+	ctx := context.Background()
+	g := &stubGit{}
+	if Compute(ctx, g, "main", nil, Options{Enabled: false, IDStyle: "hash"}) != nil {
+		t.Fatal("disabled")
+	}
+	if Compute(ctx, g, "main", nil, Options{Enabled: true, IDStyle: "sequential"}) != nil {
+		t.Fatal("sequential")
+	}
+	// Enabled hash but empty branches → empty result
+	got := Compute(ctx, g, "main", map[string]bool{}, Options{
+		Enabled: true, IDStyle: "hash", ActiveDays: 7, MaxBranches: 0, MaxTickets: 0, TicketsPath: "",
+		Now: func() time.Time { return time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC) },
+	})
+	if got == nil {
+		got = []Off{}
+	}
+	if len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestComputeMaxBranchesAndMaxTickets(t *testing.T) {
+	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	g := &stubGit{
+		branches: []gitx.Branch{
+			{Name: "b1", SHA: "s1", CommitDate: now.AddDate(0, 0, -1)},
+			{Name: "b2", SHA: "s2", CommitDate: now.AddDate(0, 0, -2)},
+			{Name: "b3", SHA: "s3", CommitDate: now.AddDate(0, 0, -3)},
+			{Name: "", SHA: "empty-name", CommitDate: now}, // skipped
+			{Name: "nosha", SHA: "", CommitDate: now},       // skipped
+		},
+		trees: map[string]map[string]string{
+			"s1": {
+				".pine/tickets/FEAT-aaaaaa.md": mkTicket("FEAT-aaaaaa", "todo", "2026-07-04T10:00:00Z"),
+				".pine/tickets/FEAT-bbbbbb.md": mkTicket("FEAT-bbbbbb", "todo", "2026-07-03T10:00:00Z"),
+			},
+			"s2": {".pine/tickets/FEAT-cccccc.md": mkTicket("FEAT-cccccc", "todo", "2026-07-02T10:00:00Z")},
+			"s3": {".pine/tickets/FEAT-dddddd.md": mkTicket("FEAT-dddddd", "todo", "2026-07-01T10:00:00Z")},
+		},
+	}
+	opts := baseOpts(now)
+	opts.MaxBranches = 1
+	opts.MaxTickets = 1
+	got := Compute(context.Background(), g, "main", nil, opts)
+	if len(got) != 1 {
+		t.Fatalf("max caps: %+v", got)
+	}
+	// Only b1 indexed; newest among its IDs is FEAT-aaaaaa
+	if got[0].Ticket.ID != "FEAT-aaaaaa" {
+		t.Fatalf("got %s", got[0].Ticket.ID)
+	}
+}
+
+func TestComputeEmptyTreeAndMissingFile(t *testing.T) {
+	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	g := &stubGit{
+		branches: []gitx.Branch{
+			{Name: "empty", SHA: "sha-empty", CommitDate: now},
+			{Name: "ghost", SHA: "sha-ghost", CommitDate: now.AddDate(0, 0, -1)},
+		},
+		trees: map[string]map[string]string{
+			"sha-empty": {},
+			// ListTreeFiles returns path but ShowFile misses it
+			"sha-ghost": {".pine/tickets/FEAT-3d4e5f.md": "ignored"},
+		},
+	}
+	// Make ShowFile fail for ghost by removing content after listing — override via empty map read:
+	// stub returns content for listed keys; replace with a custom stub behavior:
+	g.trees["sha-ghost"] = map[string]string{".pine/tickets/FEAT-3d4e5f.md": "x"}
+	// Actually ShowFile will return the content. Use a wrapper:
+	type missGit struct{ *stubGit }
+	mg := &missGit{g}
+	// Can't easily override — instead delete content so ShowFile returns false:
+	delete(g.trees["sha-ghost"], ".pine/tickets/FEAT-3d4e5f.md")
+	// But ListTreeFiles iterates trees keys — so list empty too. Put path only via custom:
+	_ = mg
+	g2 := &stubGit{
+		branches: []gitx.Branch{{Name: "empty", SHA: "sha-empty", CommitDate: now}},
+		trees:    map[string]map[string]string{"sha-empty": {}},
+	}
+	if got := Compute(context.Background(), g2, "main", nil, baseOpts(now)); got != nil && len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+}
+
+type ghostGit struct {
+	branches []gitx.Branch
+}
+
+func (g *ghostGit) IsRepo(context.Context) bool               { return true }
+func (g *ghostGit) Snapshot(context.Context, int) gitx.Status { return gitx.Status{} }
+func (g *ghostGit) Files(context.Context) []string            { return nil }
+func (g *ghostGit) Branches(context.Context) []gitx.Branch    { return g.branches }
+func (g *ghostGit) ListTreeFiles(context.Context, string, string) []string {
+	return []string{".pine/tickets/FEAT-3d4e5f.md"}
+}
+func (g *ghostGit) ShowFile(context.Context, string, string) ([]byte, bool) { return nil, false }
+func (g *ghostGit) Log(context.Context, string, string, int) []gitx.Commit { return nil }
+
+func TestComputeShowFileMiss(t *testing.T) {
+	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	g := &ghostGit{branches: []gitx.Branch{{Name: "feature", SHA: "sha", CommitDate: now}}}
+	got := Compute(context.Background(), g, "main", nil, baseOpts(now))
+	if len(got) != 0 {
+		t.Fatalf("%v", got)
 	}
 }

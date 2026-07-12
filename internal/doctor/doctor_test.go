@@ -641,3 +641,175 @@ func TestDegradedNotFixable(t *testing.T) {
 		}
 	}
 }
+
+func TestFixableCountAndParentFixes(t *testing.T) {
+	s, pine := scaffold(t)
+	if (&Report{}).FixableCount() != 0 {
+		t.Fatal("empty")
+	}
+	bug, err := s.Create(store.CreateReq{Type: "bug", Title: "not-epic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(store.CreateReq{Type: "bug", Title: "kid", Parent: bug.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(store.CreateReq{Type: "bug", Title: "ghost-parent", Parent: "EPIC-999"}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Run(s)
+	if r.FixableCount() < 2 {
+		t.Fatalf("expected fixable parent findings, count=%d\n%s", r.FixableCount(), msgs(r))
+	}
+	f := findByCode(r, "parent-not-epic")
+	if !f.Fixable() {
+		t.Fatal("parent-not-epic should be fixable")
+	}
+	if err := f.Fix(s); err != nil {
+		t.Fatal(err)
+	}
+	f2 := findByCode(r, "dangling-parent")
+	if err := f2.Fix(s); err != nil {
+		t.Fatal(err)
+	}
+	r2 := Run(reopen(t, pine))
+	out := msgs(r2)
+	if strings.Contains(out, "is not an epic") || strings.Contains(out, "does not exist") {
+		t.Fatalf("parents should be cleared:\n%s", out)
+	}
+}
+
+func TestStrayRenameTargetFixable(t *testing.T) {
+	_, pine := scaffold(t)
+	// Valid frontmatter id, invalid filename → rename target free.
+	body := "---\nid: BUG-042\ntitle: stray\nstatus: todo\ncreated: 2026-07-11T00:00:00Z\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(pine, "tickets", "weird-name.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(reopen(t, pine))
+	f := findByCode(r, "stray-file")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable stray rename:\n%s", msgs(r))
+	}
+	s := reopen(t, pine)
+	if err := f.Fix(s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(pine, "tickets", "BUG-042.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStrayRenameTargetTakenOrInvalid(t *testing.T) {
+	dir := t.TempDir()
+	present := map[string]bool{"BUG-001.md": true}
+	if got := strayRenameTarget(dir, "missing.md", present); got != "" {
+		t.Fatalf("missing file: %q", got)
+	}
+	os.WriteFile(filepath.Join(dir, "x.md"), []byte("no fm\n"), 0o644)
+	if got := strayRenameTarget(dir, "x.md", present); got != "" {
+		t.Fatalf("no id: %q", got)
+	}
+	os.WriteFile(filepath.Join(dir, "y.md"), []byte("---\nid: BUG-001\ntitle: t\n---\n"), 0o644)
+	if got := strayRenameTarget(dir, "y.md", present); got != "" {
+		t.Fatalf("taken: %q", got)
+	}
+	os.WriteFile(filepath.Join(dir, "z.md"), []byte("---\nid: BUG-002\ntitle: t\n---\n"), 0o644)
+	if got := strayRenameTarget(dir, "z.md", present); got != "BUG-002.md" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRemoveStringKeepsOthers(t *testing.T) {
+	got := removeString([]string{"a", "b", "a"}, "a")
+	if len(got) != 1 || got[0] != "b" {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestCrossBranchWarnAndComponentEmpty(t *testing.T) {
+	s, pine := scaffold(t)
+	cfg := s.Config()
+	cfg.CrossBranch.Enabled = true
+	cfg.IDStyle = "sequential"
+	if err := s.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(pine, "learnings"), 0o755)
+	os.WriteFile(filepath.Join(pine, "learnings", "LRN-400.md"), []byte(`---
+id: LRN-400
+scope: component
+source_agent: manual
+created: 2026-07-11T00:00:00Z
+---
+no component field
+`), 0o644)
+	r := Run(reopen(t, pine))
+	out := msgs(r)
+	if !strings.Contains(out, "crossBranch is enabled") {
+		t.Fatalf("crossBranch warn:\n%s", out)
+	}
+	if !strings.Contains(out, "scope is component but component field is empty") {
+		t.Fatalf("component empty:\n%s", out)
+	}
+}
+
+func TestFixLearningFrontmatterAndSupersedes(t *testing.T) {
+	s, pine := scaffold(t)
+	os.MkdirAll(filepath.Join(pine, "learnings"), 0o755)
+	os.WriteFile(filepath.Join(pine, "learnings", "LRN-010.md"), []byte(`---
+id: LRN-999
+scope: global
+source_agent: manual
+created: 2026-07-11T00:00:00Z
+---
+mismatch
+`), 0o644)
+	os.WriteFile(filepath.Join(pine, "learnings", "LRN-011.md"), []byte(`---
+id: LRN-011
+scope: global
+source_agent: manual
+supersedes: LRN-NOPE
+created: 2026-07-11T00:00:00Z
+---
+dangling
+`), 0o644)
+	// empty cite entry is skipped
+	os.WriteFile(filepath.Join(pine, "learnings", "LRN-012.md"), []byte(`---
+id: LRN-012
+scope: global
+source_agent: manual
+cites:
+  - ""
+  - gone.go
+created: 2026-07-11T00:00:00Z
+---
+cites
+`), 0o644)
+	s = reopen(t, pine)
+	r := Run(s)
+	f := findByCode(r, "learning-frontmatter-id-mismatch")
+	if err := f.Fix(s); err != nil {
+		t.Fatal(err)
+	}
+	f2 := findByCode(r, "dangling-supersedes")
+	if err := f2.Fix(s); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(pine, "learnings", "LRN-010.md"))
+	if !strings.Contains(string(data), "id: LRN-010") {
+		t.Fatalf("id not fixed:\n%s", data)
+	}
+}
+
+func TestCheckMergeDriverConfiguredNoWarn(t *testing.T) {
+	_, pine := scaffold(t)
+	repo := filepath.Dir(pine)
+	os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("foo merge=other\n"), 0o644)
+	r := &Report{}
+	checkMergeDriver(r, pine)
+	if len(r.Findings) != 0 {
+		t.Fatalf("no pine merge: %#v", r.Findings)
+	}
+}

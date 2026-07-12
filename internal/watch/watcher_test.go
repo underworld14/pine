@@ -87,3 +87,38 @@ func hasKind(batch []Event, kind Kind, id string) bool {
 	}
 	return false
 }
+
+func TestClassifyAndIgnoredName(t *testing.T) {
+	pine := filepath.Join(t.TempDir(), ".pine")
+	os.MkdirAll(filepath.Join(pine, "tickets"), 0o755)
+	w := &Watcher{pineDir: pine}
+
+	if _, ok := w.classify(filepath.Join(pine, "tickets", ".hidden")); ok {
+		t.Fatal("dotfile")
+	}
+	if _, ok := w.classify(filepath.Join(pine, "board.json")); !ok {
+		t.Fatal("board")
+	}
+	if ev, ok := w.classify(filepath.Join(pine, "tickets", "notes.txt")); ok {
+		t.Fatalf("non-ticket: %+v", ev)
+	}
+	if !ignoredName("") || !ignoredName(".x") || !ignoredName("f~") || !ignoredName("x.swp") || !ignoredName("x.swx") || !ignoredName("4913") {
+		t.Fatal("ignoredName")
+	}
+	if ignoredName("BUG-001.md") {
+		t.Fatal("real name")
+	}
+}
+
+func TestClassifyOutsidePineDir(t *testing.T) {
+	pine := filepath.Join(t.TempDir(), ".pine")
+	os.MkdirAll(pine, 0o755)
+	w := &Watcher{pineDir: pine}
+	// Absolute path outside pine — Rel still works but won't match prefixes.
+	if _, ok := w.classify(filepath.Join(t.TempDir(), "other.txt")); ok {
+		t.Fatal("outside")
+	}
+	if ev, ok := w.classify(filepath.Join(pine, "learnings", "notes.md")); ok {
+		t.Fatalf("non-learning file: %+v", ev)
+	}
+}

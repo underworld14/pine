@@ -245,3 +245,86 @@ func TestLogNotARepo(t *testing.T) {
 		t.Errorf("non-repo Log should be nil, got %+v", got)
 	}
 }
+
+func TestNullClientAndShortHash(t *testing.T) {
+	n := nullClient{}
+	ctx := context.Background()
+	if n.IsRepo(ctx) {
+		t.Fatal("null IsRepo")
+	}
+	s := n.Snapshot(ctx, 5)
+	if s.IsRepo || s.Changes == nil || s.Commits == nil {
+		t.Fatalf("%+v", s)
+	}
+	if n.Files(ctx) != nil || n.Branches(ctx) != nil || n.ListTreeFiles(ctx, "x", "y") != nil {
+		t.Fatal("null slices")
+	}
+	if b, ok := n.ShowFile(ctx, "a", "b"); ok || b != nil {
+		t.Fatal("ShowFile")
+	}
+	if n.Log(ctx, "", "", 1) != nil {
+		t.Fatal("Log")
+	}
+	if shortHash("abcd") != "abcd" {
+		t.Fatal("short")
+	}
+	if shortHash("abcdefghij") != "abcdefgh" {
+		t.Fatal("truncate")
+	}
+}
+
+func TestSnapshotNonRepo(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	c := New(dir)
+	s := c.Snapshot(context.Background(), 5)
+	if s.IsRepo {
+		t.Fatal("non-repo should not report IsRepo")
+	}
+}
+
+func TestChangesAndCommitsEdgeCases(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1\n"), 0o644)
+	run(t, dir, "add", "a.txt")
+	run(t, dir, "commit", "-q", "-m", "c1")
+	// Rename-like status: modify + untracked with spaces
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("2\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "new file.txt"), []byte("x\n"), 0o644)
+	c := New(dir).(*cli)
+	ctx := context.Background()
+	changes, dirty, _ := c.changes(ctx)
+	if !dirty || len(changes) == 0 {
+		t.Fatalf("changes=%v dirty=%v", changes, dirty)
+	}
+	commits := c.commits(ctx, 0) // limit <=0 path
+	if len(commits) == 0 {
+		t.Fatal("expected commits")
+	}
+	if shortHash("") != "" {
+		t.Fatal("empty hash")
+	}
+}
+
+
+func TestLogWithPathspecDefaultLimit(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1\n"), 0o644)
+	run(t, dir, "add", "a.txt")
+	run(t, dir, "commit", "-q", "-m", "only")
+	c := New(dir)
+	logs := c.Log(context.Background(), "a.txt", "", 0)
+	if len(logs) != 1 || logs[0].Subject != "only" {
+		t.Fatalf("%+v", logs)
+	}
+	logs = c.Log(context.Background(), "", "only", 5)
+	if len(logs) != 1 {
+		t.Fatalf("grep: %+v", logs)
+	}
+}
