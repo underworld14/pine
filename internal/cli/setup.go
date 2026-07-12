@@ -34,6 +34,7 @@ func newSetupCmd() *cobra.Command {
 	f.BoolVar(&printT, "print", false, "print rendered template to stdout")
 
 	cmd.AddCommand(newSetupAgentCmd())
+	cmd.AddCommand(newSetupMergeCmd())
 	for _, recipe := range setup.AllRecipes {
 		cmd.AddCommand(newSetupRecipeCmd(recipe))
 	}
