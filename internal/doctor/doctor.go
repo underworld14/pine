@@ -6,6 +6,7 @@ package doctor
 import (
 	"bufio"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -25,20 +26,36 @@ const (
 	LevelError
 )
 
-// Finding is one doctor result.
+// Finding is one doctor result. Code is a stable machine-readable slug for
+// fixable findings (empty for informational ones). Fix, when non-nil, performs
+// a mechanical repair; findings that need human judgment leave it nil.
 type Finding struct {
 	Level Level
+	Code  string
 	Msg   string
+	Fix   func(s *store.Store) error `json:"-"`
 }
+
+// Fixable reports whether this finding can be auto-repaired.
+func (f Finding) Fixable() bool { return f.Fix != nil }
 
 // Report collects findings.
 type Report struct {
 	Findings []Finding
 }
 
-func (r *Report) ok(msg string)   { r.Findings = append(r.Findings, Finding{LevelOK, msg}) }
-func (r *Report) warn(msg string) { r.Findings = append(r.Findings, Finding{LevelWarn, msg}) }
-func (r *Report) err(msg string)  { r.Findings = append(r.Findings, Finding{LevelError, msg}) }
+func (r *Report) ok(msg string) { r.Findings = append(r.Findings, Finding{Level: LevelOK, Msg: msg}) }
+func (r *Report) warn(msg string) {
+	r.Findings = append(r.Findings, Finding{Level: LevelWarn, Msg: msg})
+}
+func (r *Report) err(msg string) {
+	r.Findings = append(r.Findings, Finding{Level: LevelError, Msg: msg})
+}
+
+// warnFix records a fixable warning with a stable code and a repair closure.
+func (r *Report) warnFix(code, msg string, fix func(s *store.Store) error) {
+	r.Findings = append(r.Findings, Finding{Level: LevelWarn, Code: code, Msg: msg, Fix: fix})
+}
 
 // HasErrors reports whether any error-level finding exists.
 func (r *Report) HasErrors() bool {
@@ -48,6 +65,17 @@ func (r *Report) HasErrors() bool {
 		}
 	}
 	return false
+}
+
+// FixableCount returns how many findings can be auto-repaired.
+func (r *Report) FixableCount() int {
+	n := 0
+	for _, f := range r.Findings {
+		if f.Fixable() {
+			n++
+		}
+	}
+	return n
 }
 
 var ticketFileRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9a-hj-km-np-tv-z]+\.md$`)
@@ -88,8 +116,14 @@ func Run(s *store.Store) *Report {
 		for _, w := range t.Warnings {
 			r.warn(t.ID + ": " + w)
 		}
+		id := t.ID
 		if t.FrontmatterID != "" && t.FrontmatterID != t.ID {
-			r.warn(t.ID + ": frontmatter id is " + t.FrontmatterID + " (does not match filename)")
+			r.warnFix("frontmatter-id-mismatch", t.ID+": frontmatter id is "+t.FrontmatterID+" (does not match filename)",
+				func(s *store.Store) error {
+					// A no-op update re-serializes with the canonical, filename-derived id.
+					_, err := s.Update(id, func(*ticket.Ticket) error { return nil })
+					return err
+				})
 		}
 		if t.Status != "" && !board.HasStatus(t.Status) {
 			r.warn(t.ID + ": status " + t.Status + " matches no board column")
@@ -99,14 +133,25 @@ func Run(s *store.Store) *Report {
 		}
 		for _, dep := range t.Deps {
 			if byID[dep] == nil {
-				r.warn(t.ID + ": dangling dependency " + dep)
+				dep := dep
+				r.warnFix("dangling-dep", t.ID+": dangling dependency "+dep, func(s *store.Store) error {
+					_, err := s.Update(id, func(tt *ticket.Ticket) error {
+						tt.Deps = removeString(tt.Deps, dep)
+						return nil
+					})
+					return err
+				})
 			}
 		}
 		if t.Parent != "" {
+			clearParent := func(s *store.Store) error {
+				_, err := s.Update(id, func(tt *ticket.Ticket) error { tt.Parent = ""; return nil })
+				return err
+			}
 			if p := byID[t.Parent]; p == nil {
-				r.warn(t.ID + ": parent " + t.Parent + " does not exist")
+				r.warnFix("dangling-parent", t.ID+": parent "+t.Parent+" does not exist", clearParent)
 			} else if p.Prefix() != "EPIC" {
-				r.warn(t.ID + ": parent " + t.Parent + " is not an epic")
+				r.warnFix("parent-not-epic", t.ID+": parent "+t.Parent+" is not an epic", clearParent)
 			}
 		}
 		checkAttachmentRefs(r, s, t)
@@ -120,6 +165,7 @@ func Run(s *store.Store) *Report {
 	checkLearnings(r, s, byID)
 	checkAttachmentDirs(r, s, byID, cfg.Attachments.MaxVideoMB)
 	checkGitignore(r, root)
+	checkMergeDriver(r, root)
 
 	if !r.HasErrors() {
 		r.ok("no problems found")
@@ -149,21 +195,70 @@ func checkAttachmentRefs(r *Report, s *store.Store, t *ticket.Ticket) {
 
 // checkStrays scans root/dir for entries that don't look like a valid
 // <label> filename (e.g. tickets/ or learnings/, both use the same ID
-// alphabet).
+// alphabet). When a stray file carries a valid frontmatter id whose canonical
+// filename is free, it can be auto-renamed; otherwise the fix needs judgment.
 func checkStrays(r *Report, root, dir, label string) {
-	entries, err := os.ReadDir(filepath.Join(root, dir))
+	dirPath := filepath.Join(root, dir)
+	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return
+	}
+	present := map[string]bool{}
+	for _, e := range entries {
+		present[e.Name()] = true
 	}
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if !ticketFileRe.MatchString(name) {
-			r.warn(dir + "/" + name + ": stray file (not a valid " + label + " name)")
+		if ticketFileRe.MatchString(name) {
+			continue
+		}
+		msg := dir + "/" + name + ": stray file (not a valid " + label + " name)"
+		if target := strayRenameTarget(dirPath, name, present); target != "" {
+			from := filepath.Join(dirPath, name)
+			to := filepath.Join(dirPath, target)
+			r.warnFix("stray-file", msg+" — can be renamed to "+target, func(*store.Store) error {
+				return os.Rename(from, to)
+			})
+		} else {
+			r.warn(msg)
 		}
 	}
+}
+
+// strayRenameTarget returns the canonical "<id>.md" filename a stray file could
+// be renamed to — derived from its frontmatter id — or "" when it has no valid
+// id or that name is already taken. The frontmatter id key is identical for
+// tickets and learnings, so ticket.Parse extracts it for both.
+func strayRenameTarget(dirPath, name string, present map[string]bool) string {
+	data, err := os.ReadFile(filepath.Join(dirPath, name))
+	if err != nil {
+		return ""
+	}
+	t := ticket.Parse(strings.TrimSuffix(name, ".md"), data)
+	fid := strings.TrimSpace(t.FrontmatterID)
+	if fid == "" || !ticket.ValidID(fid) {
+		return ""
+	}
+	target := fid + ".md"
+	if present[target] {
+		return ""
+	}
+	return target
+}
+
+// removeString returns vals with the first occurrence of v removed.
+func removeString(vals []string, v string) []string {
+	out := make([]string, 0, len(vals))
+	for _, x := range vals {
+		if x == v {
+			continue
+		}
+		out = append(out, x)
+	}
+	return out
 }
 
 func checkLearnings(r *Report, s *store.Store, byID map[string]*ticket.Ticket) {
@@ -180,11 +275,16 @@ func checkLearnings(r *Report, s *store.Store, byID map[string]*ticket.Ticket) {
 		for _, w := range l.Warnings {
 			r.warn(l.ID + ": " + w)
 		}
+		lid := l.ID
 		if l.FrontmatterID != "" && l.FrontmatterID != l.ID {
-			r.warn(l.ID + ": frontmatter id is " + l.FrontmatterID + " (does not match filename)")
+			r.warnFix("learning-frontmatter-id-mismatch", l.ID+": frontmatter id is "+l.FrontmatterID+" (does not match filename)",
+				func(s *store.Store) error {
+					_, err := s.UpdateLearning(lid, func(*learning.Learning) error { return nil })
+					return err
+				})
 		}
 		if l.Scope != "" && !learning.ValidScope(l.Scope) {
-			r.warn(l.ID + ": scope " + l.Scope + " is not valid (expected global or ticket)")
+			r.warn(l.ID + ": scope " + l.Scope + " is not valid (expected global, ticket, or component)")
 		}
 		if l.SourceAgent != "" && !learning.ValidSourceAgent(l.SourceAgent) {
 			r.warn(l.ID + ": source_agent " + l.SourceAgent + " is not recognized")
@@ -193,12 +293,24 @@ func checkLearnings(r *Report, s *store.Store, byID map[string]*ticket.Ticket) {
 			if l.Ticket == "" {
 				r.warn(l.ID + ": scope is ticket but ticket field is empty")
 			} else if byID[l.Ticket] == nil {
+				// Dropping the ticket ref would leave an invalid ticket-scoped
+				// learning, so this needs human judgment (re-point or delete).
 				r.warn(l.ID + ": dangling ticket ref " + l.Ticket)
 			}
 		}
+		if l.Scope == learning.ScopeComponent && l.Component == "" {
+			r.warn(l.ID + ": scope is component but component field is empty")
+		}
 		if l.Supersedes != "" {
 			if _, ok := learningByID[l.Supersedes]; !ok {
-				r.warn(l.ID + ": dangling supersedes ref " + l.Supersedes)
+				r.warnFix("dangling-supersedes", l.ID+": dangling supersedes ref "+l.Supersedes,
+					func(s *store.Store) error {
+						_, err := s.UpdateLearning(lid, func(m *learning.Learning) error {
+							m.Supersedes = ""
+							return nil
+						})
+						return err
+					})
 			}
 		}
 		for _, cite := range l.Cites {
@@ -207,7 +319,14 @@ func checkLearnings(r *Report, s *store.Store, byID map[string]*ticket.Ticket) {
 				continue
 			}
 			if !s.CiteExists(cite) {
-				r.warn(l.ID + ": dangling cite " + cite)
+				cite := cite
+				r.warnFix("dangling-cite", l.ID+": dangling cite "+cite, func(s *store.Store) error {
+					_, err := s.UpdateLearning(lid, func(m *learning.Learning) error {
+						m.Cites = removeString(m.Cites, cite)
+						return nil
+					})
+					return err
+				})
 			}
 		}
 	}
@@ -229,6 +348,21 @@ func checkAttachmentDirs(r *Report, s *store.Store, byID map[string]*ticket.Tick
 				r.warn(id + ": video " + a.Name + " exceeds " + strconv.Itoa(maxVideoMB) + "MB (bloats the repo)")
 			}
 		}
+	}
+}
+
+// checkMergeDriver warns when .gitattributes maps ticket files to the pine
+// merge driver but this clone hasn't configured it (a fresh clone that skipped
+// 'pine setup merge' — merges would fall back to raw text conflicts).
+func checkMergeDriver(r *Report, pineRoot string) {
+	repoRoot := filepath.Dir(pineRoot)
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitattributes"))
+	if err != nil || !strings.Contains(string(data), "merge=pine") {
+		return
+	}
+	out, err := exec.Command("git", "-C", repoRoot, "config", "--get", "merge.pine.driver").Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		r.warn(".gitattributes references merge=pine but git config merge.pine.driver is unset — run 'pine setup merge'")
 	}
 }
 

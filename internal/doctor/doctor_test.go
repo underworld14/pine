@@ -8,6 +8,7 @@ import (
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/ticket"
 )
 
 func scaffold(t *testing.T) (*store.Store, string) {
@@ -491,7 +492,7 @@ insight text
 	if !strings.Contains(out, "tags was a scalar; wrapped into a list") {
 		t.Errorf("expected tags warning:\n%s", out)
 	}
-	if !strings.Contains(out, "scope bogus-scope is not valid (expected global or ticket)") {
+	if !strings.Contains(out, "scope bogus-scope is not valid (expected global, ticket, or component)") {
 		t.Errorf("expected scope warning:\n%s", out)
 	}
 	if !strings.Contains(out, "source_agent bogus-agent is not recognized") {
@@ -541,4 +542,102 @@ func writeDeps(t *testing.T, pine, id string, deps []string) {
 	}
 	updated := s[:idx+1] + depBlock + s[idx+1:]
 	os.WriteFile(path, []byte(updated), 0o644)
+}
+
+// findByCode returns the first finding with the given code, or a zero Finding.
+func findByCode(r *Report, code string) Finding {
+	for _, f := range r.Findings {
+		if f.Code == code {
+			return f
+		}
+	}
+	return Finding{}
+}
+
+func TestFixDanglingDep(t *testing.T) {
+	s, pine := scaffold(t)
+	tk, err := s.Create(store.CreateReq{Type: "bug", Title: "has bad dep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(tk.ID, func(x *ticket.Ticket) error { x.Deps = []string{"BUG-999"}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(s)
+	f := findByCode(r, "dangling-dep")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable dangling-dep, findings:\n%s", msgs(r))
+	}
+	if err := f.Fix(s); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+	r2 := Run(reopen(t, pine))
+	if strings.Contains(msgs(r2), "dangling dependency") {
+		t.Errorf("dangling dep should be gone:\n%s", msgs(r2))
+	}
+}
+
+func TestFixFrontmatterIDMismatch(t *testing.T) {
+	s, pine := scaffold(t)
+	// Filename says BUG-001, frontmatter claims BUG-999.
+	body := "---\nid: BUG-999\ntitle: mismatch\nstatus: todo\ncreated: 2026-07-11T00:00:00Z\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(pine, "tickets", "BUG-001.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s = reopen(t, pine)
+	r := Run(s)
+	f := findByCode(r, "frontmatter-id-mismatch")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable id mismatch:\n%s", msgs(r))
+	}
+	if err := f.Fix(s); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(pine, "tickets", "BUG-001.md"))
+	if !strings.Contains(string(data), "id: BUG-001") || strings.Contains(string(data), "BUG-999") {
+		t.Errorf("id not canonicalized:\n%s", data)
+	}
+}
+
+func TestFixDanglingCite(t *testing.T) {
+	s, pine := scaffold(t)
+	if err := os.MkdirAll(filepath.Join(pine, "learnings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l, err := s.CreateLearning(store.CreateLearningReq{Text: "cites a gone file", Cites: []string{"internal/gone.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Run(reopen(t, pine))
+	f := findByCode(r, "dangling-cite")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable dangling-cite:\n%s", msgs(r))
+	}
+	s = reopen(t, pine)
+	if err := f.Fix(s); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+	got, err := s.GetLearning(l.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Cites) != 0 {
+		t.Errorf("cite should be dropped, got %v", got.Cites)
+	}
+}
+
+func TestDegradedNotFixable(t *testing.T) {
+	s, pine := scaffold(t)
+	// A ticket file with malformed YAML frontmatter is degraded (report-only).
+	bad := "---\nid: BUG-001\nstatus: [unclosed\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(pine, "tickets", "BUG-001.md"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = s
+	r := Run(reopen(t, pine))
+	for _, f := range r.Findings {
+		if strings.Contains(f.Msg, "malformed") && f.Fixable() {
+			t.Errorf("degraded ticket must not be auto-fixable: %s", f.Msg)
+		}
+	}
 }
