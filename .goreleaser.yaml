@@ -17,7 +17,7 @@ builds:
     flags:
       - -tags=embedassets   # embed web/build (produced by the release workflow)
     ldflags:
-      - -s -w -X github.com/underworld14/pine/internal/cli.version={{ .Version }}
+      - -s -w -X main.version={{ .Version }}
     goos:
       - linux
       - darwin

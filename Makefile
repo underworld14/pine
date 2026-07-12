@@ -1,7 +1,7 @@
 .PHONY: web build build-dev dev test test-go test-web e2e clean lint fmt
 
 VERSION ?= 0.1.0-dev
-LDFLAGS := -X github.com/underworld14/pine/internal/cli.version=$(VERSION)
+LDFLAGS := -X main.version=$(VERSION)
 
 # Build the SvelteKit frontend into web/build (embedded by go:embed)
 web:
