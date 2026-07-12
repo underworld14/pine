@@ -180,6 +180,9 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	for _, c := range git.Changes {
 		cwdHints = append(cwdHints, c.Path)
 	}
+	if block := FormatMemoryBlock(s, cwdHints, nil, 3); block != "" {
+		b.WriteString(block)
+	}
 	learnings, more := SelectLearnings(s, LearningSelectOpts{CwdHints: cwdHints, Limit: 10})
 	if block := FormatLearningsBlock(learnings, more); block != "" {
 		b.WriteString(block)
@@ -193,7 +196,7 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
 	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
-	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/learnings/`.\n")
+	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (ticket one-shots: `--scope ticket`).\n")
 
 	return b.String()
 }

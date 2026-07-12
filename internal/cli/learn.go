@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,34 +11,38 @@ import (
 	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/search"
 	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/tui"
 	"github.com/underworld14/pine/internal/view"
 )
+
+// confirmDeleteFn is the interactive delete confirm (overridable in tests).
+var confirmDeleteFn = func(summary string, in io.Reader, out io.Writer) (bool, error) {
+	return tui.ConfirmDeleteIO(summary, in, out)
+}
 
 // newLearnCmd is registered from root.go.
 func newLearnCmd() *cobra.Command {
 	var (
 		scope, ticket, component, source, tagsCSV, supersedes, citesCSV, textFlag string
-		asJSON                                                                    bool
+		toPath, newTopic                                                          string
+		asJSON, legacyLRN                                                         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "learn [text]",
-		Short: "Capture a persistent learning, or list/search/show learnings",
-		Long: `Capture a persistent, cross-session, cross-agent insight under .pine/learnings/.
+		Short: "Capture a durable insight into MEMORY.md, a topic file, or a ticket LRN",
+		Long: `Capture a persistent, cross-session insight.
 
-Scope the insight with --scope global (default, visible everywhere) or
---scope ticket --ticket <ID> (visible only for that ticket). When a new
-insight replaces an older one, pass --supersedes <LRN-id> instead of leaving
-both active. When the insight depends on a specific file, pass
---cites path/to/file so 'pine doctor' and list/search/context can flag it as
-stale once that file is deleted.
+By default (no --scope ticket), Pine suggests a destination and appends to
+.pine/MEMORY.md or .pine/memory/<topic>.md — avoiding one-file-per-insight bloat.
+Use pine learn suggest "<text>" to preview recommendations.
 
-If the insight text is exactly "list", "search", or "show", pass it via
---text instead of as a positional argument — those three words are also
-subcommand names and would otherwise be routed there instead of captured:
+Ticket-scoped one-shots still create .pine/learnings/LRN-*.md:
+  pine learn "Fixed only for this ticket" --scope ticket --ticket BUG-001
 
-  pine learn --text "list"
+Force a destination with --to MEMORY.md | --to memory/analytics.md | --new-topic slug.
+Pass --legacy-lrn to create a global LRN-* file (escape hatch).
 
-Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <id>'.`,
+Subcommands: list, search, show, suggest, supersede, rm.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := textFlag
@@ -45,7 +50,7 @@ Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <i
 			case text != "" && len(args) > 0:
 				return fmt.Errorf("provide the insight via --text or as a positional argument, not both")
 			case text == "" && len(args) == 0:
-				return fmt.Errorf("learning text is required (or use: pine learn list | search | show)")
+				return fmt.Errorf("learning text is required (or use: pine learn list | search | show | suggest)")
 			case text == "":
 				text = args[0]
 			}
@@ -54,6 +59,7 @@ Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <i
 				return err
 			}
 			tags := splitCSV(tagsCSV)
+			cites := splitCSV(citesCSV)
 			ticketID := ""
 			if ticket != "" {
 				ticketID = normalizeID(ticket)
@@ -62,41 +68,65 @@ Subcommands: 'pine learn list', 'pine learn search <query>', 'pine learn show <i
 			if supersedes != "" {
 				sup = normalizeID(supersedes)
 			}
-			l, err := s.CreateLearning(store.CreateLearningReq{
-				Text:        text,
-				Scope:       scope,
-				Tags:        tags,
-				Ticket:      ticketID,
-				Component:   component,
-				SourceAgent: source,
-				Supersedes:  sup,
-				Cites:       splitCSV(citesCSV),
-			})
-			if err != nil {
-				return err
+
+			scopeNorm := strings.ToLower(strings.TrimSpace(scope))
+			if scopeNorm == "" {
+				scopeNorm = learning.ScopeGlobal
 			}
-			if asJSON {
-				dto := view.BuildLearning(l)
-				dto.Stale = s.CitationStaleIDs([]*learning.Learning{l})[l.ID]
-				return writeJSON(cmd.OutOrStdout(), dto)
+
+			// Ticket-scoped (or explicit legacy LRN) → classic learning file.
+			if scopeNorm == learning.ScopeTicket || legacyLRN || sup != "" {
+				if scopeNorm == learning.ScopeGlobal && legacyLRN {
+					// keep global
+				} else if scopeNorm != learning.ScopeTicket && sup != "" {
+					// supersede via main command still creates LRN
+				}
+				l, err := s.CreateLearning(store.CreateLearningReq{
+					Text:        text,
+					Scope:       scopeNorm,
+					Tags:        tags,
+					Ticket:      ticketID,
+					Component:   component,
+					SourceAgent: source,
+					Supersedes:  sup,
+					Cites:       cites,
+				})
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					dto := view.BuildLearning(l)
+					dto.Stale = s.CitationStaleIDs([]*learning.Learning{l})[l.ID]
+					return writeJSON(cmd.OutOrStdout(), dto)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Captured %s\n", l.ID)
+				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Captured %s\n", l.ID)
-			return nil
+
+			if scopeNorm == learning.ScopeComponent && strings.TrimSpace(component) == "" {
+				return fmt.Errorf("--component is required when --scope component")
+			}
+
+			// Default / component → MEMORY.md or memory/<topic>.md
+			return captureMemoryInsight(cmd, s, text, cites, component, toPath, newTopic, asJSON)
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global | ticket | component")
-	f.StringVar(&tagsCSV, "tags", "", "comma-separated tags")
+	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global (default → MEMORY/topics) | ticket | component")
+	f.StringVar(&tagsCSV, "tags", "", "comma-separated tags (LRN only)")
 	f.StringVar(&ticket, "ticket", "", "ticket ID (required when --scope ticket)")
-	f.StringVar(&component, "component", "", "component path/name (required when --scope component)")
+	f.StringVar(&component, "component", "", "component path hint for topic matching")
 	f.StringVar(&source, "source", learning.SourceManual, "source agent: claude-code|codex|cursor|gemini|manual")
-	f.StringVar(&supersedes, "supersedes", "", "learning ID this insight replaces")
+	f.StringVar(&supersedes, "supersedes", "", "learning ID this insight replaces (creates LRN)")
 	f.StringVar(&citesCSV, "cites", "", "comma-separated repo-relative file paths this insight depends on")
-	f.StringVar(&textFlag, "text", "", `insight text, as an alternative to the positional argument (required if the insight is exactly "list", "search", or "show")`)
+	f.StringVar(&textFlag, "text", "", `insight text, as an alternative to the positional argument (required if the insight is exactly "list", "search", "show", or "suggest")`)
+	f.StringVar(&toPath, "to", "", "force destination: MEMORY.md or memory/<topic>.md")
+	f.StringVar(&newTopic, "new-topic", "", "create/append memory/<slug>.md")
+	f.BoolVar(&legacyLRN, "legacy-lrn", false, "create a classic LRN-* file instead of MEMORY/topics")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 
 	cmd.AddCommand(newLearnListCmd(), newLearnSearchCmd(), newLearnShowCmd(),
-		newLearnSupersedeCmd(), newLearnRmCmd())
+		newLearnSuggestCmd(), newLearnSupersedeCmd(), newLearnRmCmd())
 	return cmd
 }
 
@@ -207,8 +237,16 @@ this leaves no history. Prompts for confirmation unless --yes is given.`,
 				return err
 			}
 			if !yes {
-				fmt.Fprintf(cmd.OutOrStdout(), "Delete %s: %q? [y/N] ", id, truncate(strings.TrimSpace(l.Body), 50))
-				if !readYesLearn(cmd.InOrStdin()) {
+				summary := fmt.Sprintf("%s: %q", id, truncate(strings.TrimSpace(l.Body), 50))
+				ok, err := confirmDeleteFn(summary, cmd.InOrStdin(), cmd.OutOrStdout())
+				if err != nil {
+					if errors.Is(err, tui.ErrCancelled) {
+						fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+						return nil
+					}
+					return err
+				}
+				if !ok {
 					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
 					return nil
 				}
@@ -222,14 +260,6 @@ this leaves no history. Prompts for confirmation unless --yes is given.`,
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt")
 	return cmd
-}
-
-// readYesLearn reads a single line and reports whether it is an affirmative.
-func readYesLearn(r io.Reader) bool {
-	var line string
-	_, _ = fmt.Fscanln(r, &line)
-	line = strings.TrimSpace(strings.ToLower(line))
-	return line == "y" || line == "yes"
 }
 
 func newLearnListCmd() *cobra.Command {
@@ -250,6 +280,12 @@ to audit them. Narrow the list with --scope, --tags (AND), and --ticket.`,
 			s, err := openStore()
 			if err != nil {
 				return err
+			}
+			if !asJSON {
+				if err := listMemoryEntries(cmd, s); err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "LRN learnings:")
 			}
 			items := s.ListLearnings(lf.build())
 			if asJSON {
@@ -305,8 +341,8 @@ first with --scope, --tags (AND), and --ticket.`,
 			for _, l := range corpus {
 				idx.Upsert(search.DocFromLearning(l))
 			}
+			searchMemoryInto(idx, s.Root())
 			hits := idx.Search(args[0], search.Filter{
-				Kind:  search.KindLearning,
 				Scope: filter.Scope,
 				Tags:  filter.Tags,
 			}, 20)
@@ -321,16 +357,26 @@ first with --scope, --tags (AND), and --ticket.`,
 				all := s.AllLearnings()
 				_, rev := learning.BuildEdges(all)
 				created := learning.CreatedMap(all)
-				out := make([]view.LearningHit, 0, len(hits))
+				type hitOut struct {
+					Kind  string  `json:"kind"`
+					Score float64 `json:"score"`
+					Path  string  `json:"path,omitempty"`
+					view.LearningHit
+				}
+				out := make([]hitOut, 0, len(hits))
 				for _, h := range hits {
-					l := byID[h.ID]
-					if l == nil {
+					if l := byID[h.ID]; l != nil {
+						dto := view.BuildLearning(l)
+						dto.Stale = stale[l.ID]
+						dto.SupersededBy = learning.SupersededBy(rev, created, l.ID)
+						out = append(out, hitOut{
+							Kind:         "learning",
+							Score:        h.Score,
+							LearningHit:  view.LearningHit{Learning: dto, Score: h.Score},
+						})
 						continue
 					}
-					dto := view.BuildLearning(l)
-					dto.Stale = stale[l.ID]
-					dto.SupersededBy = learning.SupersededBy(rev, created, l.ID)
-					out = append(out, view.LearningHit{Learning: dto, Score: h.Score})
+					out = append(out, hitOut{Kind: "memory", Score: h.Score, Path: h.ID})
 				}
 				return writeJSON(cmd.OutOrStdout(), out)
 			}
@@ -339,17 +385,18 @@ first with --scope, --tags (AND), and --ticket.`,
 				return nil
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tSCOPE\tTARGET\tTAGS\tSCORE\tSTATUS\tBODY")
+			fmt.Fprintln(w, "ID\tKIND\tSCOPE\tTARGET\tTAGS\tSCORE\tSTATUS\tBODY")
 			for _, h := range hits {
 				l := byID[h.ID]
 				if l == nil {
+					fmt.Fprintf(w, "%s\tmemory\t-\t-\t-\t%.2f\t\t\n", h.ID, h.Score)
 					continue
 				}
 				status := ""
 				if stale[l.ID] {
 					status = "stale"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.2f\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\tlearning\t%s\t%s\t%s\t%.2f\t%s\t%s\n",
 					l.ID, l.Scope, scopeTarget(l), strings.Join(l.Tags, ","), h.Score, status, truncate(strings.TrimSpace(l.Body), 60))
 			}
 			return w.Flush()
@@ -363,16 +410,20 @@ first with --scope, --tags (AND), and --ticket.`,
 func newLearnShowCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "show <id>",
-		Short: "Show one learning, including supersedes relationships and cite status",
-		Long: `Show one learning's full detail: scope, tags, ticket, both directions of
-its supersede chain, per-citation existence (✓/✗), and the insight body.
-A learning whose frontmatter could not be parsed is shown read-only with a
-degraded note instead of being hidden.`,
+		Use:   "show <id-or-path>",
+		Short: "Show one learning, MEMORY.md, or a memory topic file",
+		Long: `Show one learning's full detail, or a memory destination:
+
+  pine learn show LRN-001
+  pine learn show MEMORY.md
+  pine learn show memory/analytics.md`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
+				return err
+			}
+			if handled, err := tryShowMemory(cmd, s, args[0], asJSON); handled {
 				return err
 			}
 			id := normalizeID(args[0])

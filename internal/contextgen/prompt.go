@@ -86,6 +86,9 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 		tmplUsesLearnings = templateReferencesLearnings(DefaultFixTemplate)
 	}
 	out := b.String()
+	if mem := FormatMemoryBlock(s, nil, t.Labels, 2); mem != "" {
+		out = mem + out
+	}
 	if !tmplUsesLearnings {
 		out = appendLearningsBlock(out, selected, more)
 	}

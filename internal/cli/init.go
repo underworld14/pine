@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/contextgen"
+	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/setup"
 )
 
@@ -47,7 +48,7 @@ func runInit(cmd *cobra.Command, skipAgents bool) error {
 	pineDir := filepath.Join(root, ".pine")
 	projectName := filepath.Base(root)
 
-	for _, d := range []string{"", "tickets", "attachments", "templates", "prompts", "learnings"} {
+	for _, d := range []string{"", "tickets", "attachments", "templates", "prompts", "learnings", "memory"} {
 		if err := os.MkdirAll(filepath.Join(pineDir, d), 0o755); err != nil {
 			return err
 		}
@@ -72,6 +73,7 @@ func runInit(cmd *cobra.Command, skipAgents bool) error {
 		{filepath.Join(pineDir, "templates", "feature.md"), []byte(tmplFeature)},
 		{filepath.Join(pineDir, "templates", "epic.md"), []byte(tmplEpic)},
 		{filepath.Join(pineDir, "prompts", "fix.md"), []byte(promptFix)},
+		{filepath.Join(pineDir, "MEMORY.md"), []byte(memory.DefaultMEMORY)},
 	}
 	createdAny := false
 	for _, f := range files {

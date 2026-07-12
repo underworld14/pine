@@ -36,6 +36,7 @@ type Doc struct {
 const (
 	KindTicket   = "ticket"
 	KindLearning = "learning"
+	KindMemory   = "memory"
 )
 
 // Filter narrows results to matching field values (all optional).
