@@ -538,3 +538,109 @@ func TestLearnCitesAndSupersedesIndependent(t *testing.T) {
 		t.Fatalf("both flags should show entry: %#v", listed)
 	}
 }
+
+func TestLearnSupersedeAndRm(t *testing.T) {
+	dir := initRepo(t)
+	// Capture an initial global learning.
+	if _, err := run(t, dir, "learn", "old rule about retries", "--tags", "net"); err != nil {
+		t.Fatalf("learn: %v", err)
+	}
+	// Supersede it; the new learning should inherit tags.
+	out, err := run(t, dir, "learn", "supersede", "LRN-001", "new rule about retries")
+	if err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	if !strings.Contains(out, "supersedes LRN-001") {
+		t.Errorf("supersede output = %q", out)
+	}
+	// list hides the superseded LRN-001, shows LRN-002.
+	out, err = run(t, dir, "learn", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "LRN-001") || !strings.Contains(out, "LRN-002") {
+		t.Errorf("list after supersede = %q", out)
+	}
+	// rm --yes deletes LRN-002.
+	if _, err := run(t, dir, "learn", "rm", "LRN-002", "--yes"); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+	out, _ = run(t, dir, "learn", "list", "--include-superseded")
+	if strings.Contains(out, "LRN-002") {
+		t.Errorf("LRN-002 should be gone after rm:\n%s", out)
+	}
+}
+
+func TestLearnComponentScopeCLI(t *testing.T) {
+	dir := initRepo(t)
+	if _, err := run(t, dir, "learn", "prefer atomic writes here", "--scope", "component", "--component", "internal/store"); err != nil {
+		t.Fatalf("learn component: %v", err)
+	}
+	out, err := run(t, dir, "learn", "list", "--scope", "component", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []view.Learning
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(got) != 1 || got[0].Component != "internal/store" || got[0].Scope != "component" {
+		t.Errorf("component learning = %+v", got)
+	}
+	// Missing --component is rejected.
+	if _, err := run(t, dir, "learn", "x", "--scope", "component"); err == nil {
+		t.Error("component scope without --component should error")
+	}
+}
+
+func TestDoctorFixCLI(t *testing.T) {
+	dir := initRepo(t)
+	// Plant a ticket whose frontmatter id disagrees with its filename.
+	body := "---\nid: BUG-999\ntitle: mismatch\nstatus: todo\ncreated: 2026-07-11T00:00:00Z\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// --dry-run reports it as fixable, changes nothing.
+	out, _ := run(t, dir, "doctor", "--dry-run")
+	if !strings.Contains(out, "can be auto-fixed") || !strings.Contains(out, "[fixable]") {
+		t.Errorf("dry-run output = %q", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	if !strings.Contains(string(data), "BUG-999") {
+		t.Error("dry-run must not modify files")
+	}
+	// --json includes a fixable finding.
+	out, _ = run(t, dir, "doctor", "--json")
+	if !strings.Contains(out, "\"fixable\": true") || !strings.Contains(out, "frontmatter-id-mismatch") {
+		t.Errorf("json output = %q", out)
+	}
+	// --fix applies it; a follow-up doctor is clean of the mismatch.
+	out, _ = run(t, dir, "doctor", "--fix")
+	if !strings.Contains(out, "fixed:") {
+		t.Errorf("fix output = %q", out)
+	}
+	data, _ = os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	if strings.Contains(string(data), "BUG-999") || !strings.Contains(string(data), "id: BUG-001") {
+		t.Errorf("fix did not canonicalize id:\n%s", data)
+	}
+}
+
+func TestDoctorFixJSONIsValid(t *testing.T) {
+	dir := initRepo(t)
+	// Plant a fixable frontmatter-id mismatch.
+	body := "---\nid: BUG-999\ntitle: mismatch\nstatus: todo\ncreated: 2026-07-11T00:00:00Z\nupdated: 2026-07-11T00:00:00Z\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := run(t, dir, "doctor", "--fix", "--json")
+	var findings []map[string]any
+	if err := json.Unmarshal([]byte(out), &findings); err != nil {
+		t.Fatalf("doctor --fix --json must emit valid JSON, got parse error %v:\n%s", err, out)
+	}
+	// The fix was applied, so the mismatch should not remain in the JSON.
+	for _, f := range findings {
+		if code, _ := f["code"].(string); code == "frontmatter-id-mismatch" {
+			t.Errorf("fixed finding should not remain in the post-fix JSON: %v", f)
+		}
+	}
+}
