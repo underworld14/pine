@@ -34,6 +34,25 @@ func (r *Runner) Install(recipes []Recipe) error {
 			return err
 		}
 		fmt.Fprintf(r.Out, "  installed %s\n", info.File)
+
+		if info.SkillFile != "" {
+			status, err := InstallSkillFile(r.Root, info, r.Opts)
+			if err != nil {
+				return err
+			}
+			if status == "installed" {
+				fmt.Fprintf(r.Out, "  installed %s\n", info.SkillFile)
+			}
+		}
+		if info.InstallsHook {
+			status, err := InstallClaudeHook(r.Root)
+			if err != nil {
+				return err
+			}
+			if status == "installed" {
+				fmt.Fprintf(r.Out, "  installed .claude/settings.json (learn-reminder hook)\n")
+			}
+		}
 	}
 	return nil
 }
@@ -55,6 +74,20 @@ func (r *Runner) Remove(recipes []Recipe) error {
 		} else {
 			fmt.Fprintf(r.Out, "  no pine section in %s\n", info.File)
 		}
+		if info.SkillFile != "" {
+			if ok, err := RemoveSkillFile(r.Root, info); err != nil {
+				return err
+			} else if ok {
+				fmt.Fprintf(r.Out, "  removed %s\n", info.SkillFile)
+			}
+		}
+		if info.InstallsHook {
+			if ok, err := RemoveClaudeHook(r.Root); err != nil {
+				return err
+			} else if ok {
+				fmt.Fprintf(r.Out, "  removed learn-reminder hook from .claude/settings.json\n")
+			}
+		}
 	}
 	return nil
 }
@@ -74,6 +107,12 @@ func (r *Runner) Check(recipes []Recipe) error {
 		path := filepath.Join(r.Root, info.File)
 		status := CheckFile(path, body, recipe, r.Version)
 		fmt.Fprintf(r.Out, "  %s (%s): %s\n", info.Label, info.File, status)
+		if info.SkillFile != "" {
+			fmt.Fprintf(r.Out, "  %s: %s\n", info.SkillFile, CheckSkillFile(r.Root, info, r.Opts))
+		}
+		if info.InstallsHook {
+			fmt.Fprintf(r.Out, "  .claude/settings.json (learn-reminder hook): %s\n", CheckClaudeHook(r.Root))
+		}
 	}
 	return nil
 }

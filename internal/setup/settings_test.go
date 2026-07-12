@@ -1,0 +1,126 @@
+package setup
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestInstallClaudeSkillAndHook(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := newTestRunner(dir)
+	if err := r.Install([]Recipe{RecipeClaude}); err != nil {
+		t.Fatal(err)
+	}
+	// Skill file written.
+	skill := filepath.Join(dir, ".claude", "skills", "pine", "SKILL.md")
+	data, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatalf("skill file missing: %v", err)
+	}
+	if !strings.Contains(string(data), "name: pine") {
+		t.Errorf("skill frontmatter missing:\n%s", data)
+	}
+	// Hook installed in settings.json.
+	if got := countPineHooks(t, dir); got != 1 {
+		t.Fatalf("expected 1 pine hook, got %d", got)
+	}
+}
+
+func TestClaudeHookIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	// Pre-seed settings.json with an unrelated user hook to ensure it survives.
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(settings), 0o755)
+	os.WriteFile(settings, []byte(`{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-own-hook"}]}]}}`), 0o644)
+
+	r, _ := newTestRunner(dir)
+	for i := 0; i < 3; i++ {
+		if err := r.Install([]Recipe{RecipeClaude}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Exactly one pine hook after three installs (no duplication).
+	if got := countPineHooks(t, dir); got != 1 {
+		t.Errorf("expected 1 pine hook after 3 installs, got %d", got)
+	}
+	// User's own hook and settings survive.
+	data, _ := os.ReadFile(settings)
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("settings not valid JSON: %v\n%s", err, data)
+	}
+	if doc["model"] != "opus" {
+		t.Errorf("unrelated setting clobbered: %v", doc["model"])
+	}
+	if !strings.Contains(string(data), "my-own-hook") {
+		t.Errorf("user's own hook was removed:\n%s", data)
+	}
+
+	// Remove strips only the pine hook.
+	if err := r.Remove([]Recipe{RecipeClaude}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPineHooks(t, dir); got != 0 {
+		t.Errorf("pine hook should be gone after remove, got %d", got)
+	}
+	data, _ = os.ReadFile(settings)
+	if !strings.Contains(string(data), "my-own-hook") {
+		t.Errorf("user's own hook must survive removal:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills", "pine", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("skill file should be removed, stat err = %v", err)
+	}
+}
+
+func TestSkillFileRefreshesOnChange(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := newTestRunner(dir)
+	if err := r.Install([]Recipe{RecipeClaude}); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(dir, ".claude", "skills", "pine", "SKILL.md")
+	// Simulate a stale, hand-edited skill file.
+	os.WriteFile(skill, []byte("stale content"), 0o644)
+	if got := CheckSkillFile(dir, mustLookup(t, RecipeClaude), r.Opts); got != StatusStale {
+		t.Errorf("expected stale, got %s", got)
+	}
+	if err := r.Install([]Recipe{RecipeClaude}); err != nil {
+		t.Fatal(err)
+	}
+	if got := CheckSkillFile(dir, mustLookup(t, RecipeClaude), r.Opts); got != StatusCurrent {
+		t.Errorf("expected current after reinstall, got %s", got)
+	}
+}
+
+func countPineHooks(t *testing.T, dir string) int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	if err != nil {
+		return 0
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("settings not JSON: %v", err)
+	}
+	hooks, _ := doc["hooks"].(map[string]any)
+	stop, _ := hooks["Stop"].([]any)
+	n := 0
+	for _, g := range stop {
+		if groupHasPineHook(g) {
+			n++
+		}
+	}
+	return n
+}
+
+func mustLookup(t *testing.T, r Recipe) RecipeInfo {
+	t.Helper()
+	info, ok := Lookup(r)
+	if !ok {
+		t.Fatalf("recipe %s not found", r)
+	}
+	return info
+}

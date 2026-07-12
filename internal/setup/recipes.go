@@ -19,6 +19,13 @@ type RecipeInfo struct {
 	Label       string
 	Description string
 	Header      string
+	// SkillFile is the repo-relative path where this agent looks for a skill
+	// file, or "" when the agent has no skill convention. When set, `pine setup`
+	// installs the Pine SKILL.md there in addition to merging the markdown block.
+	SkillFile string
+	// InstallsHook is true for agents that support an executable session hook
+	// (currently only Claude Code, via .claude/settings.json).
+	InstallsHook bool
 }
 
 // Registry returns metadata for every built-in recipe.
@@ -30,13 +37,16 @@ func Registry() []RecipeInfo {
 			Label:       "AGENTS.md",
 			Description: "Codex, Factory, and generic coding agents",
 			Header:      "This project uses Pine for issue tracking.",
+			SkillFile:   ".agents/skills/pine/SKILL.md",
 		},
 		{
-			Name:        RecipeClaude,
-			File:        "CLAUDE.md",
-			Label:       "CLAUDE.md",
-			Description: "Claude Code",
-			Header:      "Claude Code: read this before working in the repository.",
+			Name:         RecipeClaude,
+			File:         "CLAUDE.md",
+			Label:        "CLAUDE.md",
+			Description:  "Claude Code",
+			Header:       "Claude Code: read this before working in the repository.",
+			SkillFile:    ".claude/skills/pine/SKILL.md",
+			InstallsHook: true,
 		},
 		{
 			Name:        RecipeGemini,

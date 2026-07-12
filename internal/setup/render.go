@@ -8,6 +8,9 @@ import (
 //go:embed templates/core.md
 var coreTemplate string
 
+//go:embed templates/skill.md
+var skillTemplate string
+
 // RenderOptions supplies dynamic fragments when rendering agent instructions.
 type RenderOptions struct {
 	// BoardColumns is a comma-separated list of kanban statuses, e.g. "todo, doing, done".
@@ -27,6 +30,13 @@ func RenderSection(recipe Recipe, version string, opts RenderOptions) (string, e
 	hash := ContentHash(body)
 	marker := BeginMarker(recipe, version, hash)
 	return marker + "\n" + body + "\n<!-- pine:end -->", nil
+}
+
+// RenderSkill builds the standalone SKILL.md content Pine installs into an
+// agent's skills directory. Unlike RenderSection it is not marker-wrapped —
+// the file is wholly Pine-owned and rewritten when the template changes.
+func RenderSkill(opts RenderOptions) string {
+	return strings.ReplaceAll(skillTemplate, "{{BOARD_COLUMNS_LINE}}", boardColumnsLine(opts.BoardColumns))
 }
 
 func boardColumnsLine(columns string) string {

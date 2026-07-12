@@ -18,12 +18,15 @@ pine show <ID> [--json]       # full ticket with deps and children
 pine prompt <ID>              # paste-ready fix brief for one ticket
 pine context                  # full project briefing (run at session start)
 pine list [--json]            # filterable ticket list
+pine log <ID> [--json]        # commits that reference or touch this ticket
 pine create / update / close  # CLI mutations
 pine learn "<insight>"        # capture a durable cross-agent learning
 pine learn list                # list captured learnings
 pine learn search "<query>"   # search learnings
 pine learn show <id>           # one learning's detail and supersede chain
-pine doctor                   # health check
+pine learn supersede <id> "…"  # replace an outdated learning
+pine learn rm <id>             # delete a learning
+pine doctor [--fix]           # health check; --fix repairs mechanical issues
 ```
 
 ### Write-back rules
@@ -44,13 +47,13 @@ Run `pine context` at the start of a session for current tickets, git state, and
 
 This project uses `pine learn` to capture cross-session, cross-agent knowledge in `.pine/learnings/`.
 
-Call `pine learn "<insight>" --scope <global|ticket> [--tags a,b] [--ticket ID]` when:
+Call `pine learn "<insight>" --scope <global|ticket|component> [--tags a,b] [--ticket ID] [--component path]` when:
 
 - You're corrected by the user on something non-obvious (a convention, a gotcha, a "don't do X")
 - You discover a workaround or project-specific constraint not already documented elsewhere
 - You finish a task and realize the approach should be the default next time
 
-If a new insight replaces an earlier learning rather than adding to it, use `pine learn ... --supersedes <id>` instead of leaving both active.
+If a new insight replaces an earlier learning rather than adding to it, use `pine learn supersede <id> "<new insight>"` (or `pine learn ... --supersedes <id>`) instead of leaving both active. To remove one outright, use `pine learn rm <id>`.
 
 If your insight references specific files, add `--cites path/to/file` so Pine can flag it automatically if that file is later deleted.
 
