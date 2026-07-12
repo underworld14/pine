@@ -38,7 +38,7 @@ func newServeCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.IntVar(&port, "port", defaultPort, "port to listen on")
 	f.StringVar(&host, "host", "127.0.0.1", "host to bind (localhost only by design)")
-	f.BoolVar(&open, "open", false, "open the browser after starting")
+	f.BoolVar(&open, "open", true, "open the default browser after starting (use --open=false to skip)")
 	f.BoolVar(&dev, "dev", false, "proxy non-API requests to the Vite dev server (localhost:5173)")
 	return cmd
 }
