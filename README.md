@@ -98,6 +98,9 @@ pine dep tree BUG-001          # dependency tree
 pine close FEAT-001            # → BUG-001 becomes ready
 pine show EPIC-001             # epic with child progress (1/2 done)
 pine update BUG-001 --status doing
+pine log BUG-001               # commits that mention or touch this ticket
+pine doctor --fix              # health check; auto-repair the mechanical issues
+pine import github             # pull open GitHub issues in as tickets (via gh)
 ```
 
 Dependency cycles are refused at write time. A ticket is **blocked** while any of
@@ -122,18 +125,23 @@ missing on disk.
 ```sh
 pine learn "Always use the query builder" --scope global --tags db
 pine learn "Fixed in BUG-014" --scope ticket --ticket BUG-014 --supersedes LRN-001
+pine learn "Store is the single write path" --scope component --component internal/store
 pine learn "Race in retry" --cites internal/webhook/retry.go
 pine learn list                    # hides superseded and citation-stale by default
 pine learn search "migration"      # same default
 pine learn show LRN-001            # supersedes / superseded by / cite ✓✗
+pine learn supersede LRN-001 "..." # capture a replacement (inherits scope/tags)
+pine learn rm LRN-002              # delete a learning permanently
 pine learn list --include-superseded
 pine learn list --include-stale
 ```
 
 Learnings are cross-session, cross-agent insights (gotchas, conventions,
 workarounds). Capture them with `pine learn` so Claude Code, Codex, Cursor, and
-Gemini all see them next session. When a new insight replaces an older one, pass
-`--supersedes <LRN-id>`; use `--include-superseded` to audit. When an insight
+Gemini all see them next session. Scope them `global`, `ticket` (`--ticket ID`),
+or `component` (`--component path`). When a new insight replaces an older one,
+use `pine learn supersede <LRN-id> "..."` (or `--supersedes <LRN-id>`); use
+`--include-superseded` to audit, or `pine learn rm <id>` to delete outright. When an insight
 depends on specific files, pass `--cites path/to/file` — if that path is later
 deleted, `pine doctor` reports a dangling cite and list/search/context hide the
 entry by default (`--include-stale` to audit). Renames (`git mv`) look like
@@ -159,6 +167,12 @@ Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each file gets a
 marked `<!-- pine:begin ... -->` section with workflow rules, CLI reference, and
 instructions for `pine learn` (persistent cross-agent learnings). Re-run
 `pine setup agent` after upgrading Pine to refresh stale sections.
+
+Beyond the markdown block, setup also installs a first-class **skill**
+(`.claude/skills/pine/SKILL.md` for Claude Code, `.agents/skills/pine/SKILL.md`
+for Codex/generic agents) and, for Claude Code, a **Stop hook** in
+`.claude/settings.json` that reminds the agent to capture learnings before
+ending a turn. Both are idempotent and removed by `pine setup --remove`.
 
 ---
 
@@ -248,6 +262,23 @@ against a git worktree pinned to one branch.
 or two AI agents — never mint the same ID. Prefer the classic sequential
 `BUG-001`? Set `"idStyle": "sequential"`; just note that concurrent branches can
 then choose the same number and clash on merge (`pine doctor` flags duplicates).
+
+**Field-level merges.** Run `pine setup merge` once per clone to register Pine's
+git merge driver for `.pine/tickets/*.md`. When two branches edit the same
+ticket, git then merges it field by field — one side's `status` change and the
+other's new label combine cleanly instead of producing a raw YAML conflict.
+Genuine divergences (both sides rewrite the body, or change the same scalar) are
+still surfaced for review. The `.gitattributes` rule is committed and shared;
+the git config is local, so each teammate runs `pine setup merge` after cloning
+(`pine doctor` reminds anyone who hasn't).
+
+**Commit history.** `pine log <ID>` lists the commits that mention a ticket or
+touched its file — a quick audit trail linking tickets to the code that changed
+for them.
+
+**Importing.** Already have a GitHub backlog? `pine import github` pulls open
+issues in as tickets via your existing `gh` CLI auth (idempotent — re-running
+skips anything already imported).
 
 > For contrast, [Beads](https://github.com/gastownhall/beads) keeps issues
 > *global* across branches by storing them in a Dolt database on a separate git
