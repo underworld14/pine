@@ -103,6 +103,7 @@ pine update BUG-001 --status doing
 pine log BUG-001               # commits that mention or touch this ticket
 pine doctor --fix              # health check; auto-repair the mechanical issues
 pine import github             # pull open GitHub issues in as tickets (via gh)
+pine import beads              # pull Beads issues in as tickets (via bd export)
 ```
 
 Dependency cycles are refused at write time. A ticket is **blocked** while any of
@@ -285,12 +286,15 @@ for them.
 
 **Importing.** Already have a GitHub backlog? `pine import github` pulls open
 issues in as tickets via your existing `gh` CLI auth (idempotent — re-running
-skips anything already imported).
+skips anything already imported). Migrating from [Beads](https://github.com/gastownhall/beads)?
+`pine import beads` runs `bd export` in the current project (or accepts a JSONL
+file / stdin), maps issue types (bug/task/epic/chore/…), status, priority, epic
+parents, and blocking deps, and records `beads: <id>` so re-runs are idempotent.
 
-> For contrast, [Beads](https://github.com/gastownhall/beads) keeps issues
-> *global* across branches by storing them in a Dolt database on a separate git
-> ref rather than as files on your branches — a different point in the design
-> space (global + cell-level merge, but not plain, hand-editable files).
+> For contrast, Beads keeps issues *global* across branches by storing them in a
+> Dolt database on a separate git ref rather than as files on your branches — a
+> different point in the design space (global + cell-level merge, but not plain,
+> hand-editable files).
 
 ## Web UI
 

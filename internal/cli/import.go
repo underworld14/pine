@@ -66,7 +66,7 @@ func newImportCmd() *cobra.Command {
 		Use:   "import",
 		Short: "Import tickets from an external tracker",
 	}
-	cmd.AddCommand(newImportGithubCmd())
+	cmd.AddCommand(newImportGithubCmd(), newImportBeadsCmd())
 	return cmd
 }
 
