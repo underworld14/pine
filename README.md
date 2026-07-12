@@ -117,62 +117,65 @@ pine export --format md        # all tickets as markdown (or --format json)
 
 `pine context` includes a **Conventions** block that teaches the agent how to
 write back to `.pine/` (edit `status` to move a ticket, use `deps`/`parent`, run
-`pine ready`/`pine close`). It also surfaces **Relevant Learnings** from
-`.pine/learnings/` when any exist — tip-resolving supersede chains so agents
-never see a stale rule, and excluding learnings whose `--cites` paths are
-missing on disk.
+`pine ready`/`pine close`). It also surfaces **Project Memory** (`.pine/MEMORY.md`),
+ranked **memory topics** under `.pine/memory/`, and tip-resolved **Relevant Learnings**
+(`LRN-*`, usually ticket-scoped).
 
 ```sh
-pine learn "Always use the query builder" --scope global --tags db
-pine learn "Fixed in BUG-014" --scope ticket --ticket BUG-014 --supersedes LRN-001
-pine learn "Store is the single write path" --scope component --component internal/store
-pine learn "Race in retry" --cites internal/webhook/retry.go
-pine learn list                    # hides superseded and citation-stale by default
-pine learn search "migration"      # same default
-pine learn show LRN-001            # supersedes / superseded by / cite ✓✗
-pine learn supersede LRN-001 "..." # capture a replacement (inherits scope/tags)
-pine learn rm LRN-002              # delete a learning permanently
-pine learn list --include-superseded
-pine learn list --include-stale
+pine learn suggest "prefer query builder" --cites internal/store/query.go
+pine learn "Always use the query builder" --to MEMORY.md
+pine learn "Usage icons need text-white" --to memory/analytics.md --cites apps/web/.../x.ts
+pine learn "Fixed only here" --scope ticket --ticket BUG-014
+pine learn list                    # MEMORY/topics + LRN tips
+pine learn search "migration"
+pine learn show MEMORY.md
+pine learn show memory/analytics.md
+pine learn supersede LRN-001 "..." # LRN replacement only
+pine learn rm LRN-002
 ```
 
-Learnings are cross-session, cross-agent insights (gotchas, conventions,
-workarounds). Capture them with `pine learn` so Claude Code, Codex, Cursor, and
-Gemini all see them next session. Scope them `global`, `ticket` (`--ticket ID`),
-or `component` (`--component path`). When a new insight replaces an older one,
-use `pine learn supersede <LRN-id> "..."` (or `--supersedes <LRN-id>`); use
-`--include-superseded` to audit, or `pine learn rm <id>` to delete outright. When an insight
-depends on specific files, pass `--cites path/to/file` — if that path is later
-deleted, `pine doctor` reports a dangling cite and list/search/context hide the
-entry by default (`--include-stale` to audit). Renames (`git mv`) look like
-deletions; that is intentional. `pine doctor` also flags dangling `supersedes`
-refs and supersede cycles.
+Durable insights go into **MEMORY.md** (prefs / project-wide rules) or
+**memory/<topic>.md** (append to an existing topic when relevant). Pine
+`learn suggest` ranks destinations; a confident match auto-appends. Use
+`--scope ticket` only for ephemeral ticket notes (`LRN-*`). Do not create a
+learning for routine ticket completion. Existing global `LRN-*` files still
+work; `--legacy-lrn` creates one deliberately. Citation-stale LRNs stay hidden
+from list/search/context by default (`--include-stale` to audit).
 
 ### Agent setup
 
-`pine init` runs an interactive wizard to install instructions for your coding
-agent (Claude Code, Gemini CLI, Codex, Factory, …). Forgot to set it up?
+`pine init` runs an interactive checklist (↑/↓, space to toggle, enter to confirm)
+to install instructions for your coding agent (Claude Code, Gemini CLI, Codex,
+Factory, …). Forgot to set it up?
 
 ```sh
 pine setup agent        # interactive wizard
-pine setup agent -y     # install AGENTS.md + CLAUDE.md + GEMINI.md
-pine setup agents       # AGENTS.md only
-pine setup claude       # CLAUDE.md only
+pine setup agent -y     # install AGENTS.md + CLAUDE.md + GEMINI.md + Cursor hooks
+pine setup agents       # AGENTS.md + Codex Stop hook
+pine setup claude       # CLAUDE.md + Claude Stop hook
 pine setup gemini       # GEMINI.md only
+pine setup cursor       # Cursor sessionStart hook (reuses AGENTS.md)
 pine setup --check      # verify sections are current
 pine setup --remove     # strip pine sections
 ```
 
-Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each file gets a
-marked `<!-- pine:begin ... -->` section with workflow rules, CLI reference, and
-instructions for `pine learn` (persistent cross-agent learnings). Re-run
-`pine setup agent` after upgrading Pine to refresh stale sections.
+Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each root file
+(`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) gets a short marked
+`<!-- pine:begin ... -->` summary (always-on rules + pointer to the skill).
+The full workflow lives in the **pine skill**
+(`.claude/skills/pine/SKILL.md` for Claude Code;
+`.agents/skills/pine/SKILL.md` for Codex / Cursor / Gemini / generic agents).
+Cursor also reads `AGENTS.md` — `pine setup cursor` only adds hooks.
+Re-run `pine setup agent` after upgrading Pine to refresh stale sections.
 
-Beyond the markdown block, setup also installs a first-class **skill**
-(`.claude/skills/pine/SKILL.md` for Claude Code, `.agents/skills/pine/SKILL.md`
-for Codex/generic agents) and, for Claude Code, a **Stop hook** in
-`.claude/settings.json` that reminds the agent to capture learnings before
-ending a turn. Both are idempotent and removed by `pine setup --remove`.
+Setup also installs learn-reminder hooks where the agent supports them:
+
+- **Claude Code** — `Stop` hook in `.claude/settings.json`
+- **Codex** — `Stop` hook in `.codex/hooks.json` (with `pine setup agents`)
+- **Cursor** — `sessionStart` hook in `.cursor/hooks.json` (soft
+  `additional_context`; no auto-continue)
+
+Skills and hooks are idempotent and removed by `pine setup --remove`.
 
 ---
 
@@ -184,10 +187,12 @@ Everything lives in `.pine/` and is meant to be committed:
 .pine/
   config.json           # project settings, ticket types, priorities, optimizer
   board.json            # kanban columns (statuses only — never ticket ids)
+  MEMORY.md             # project preferences and standing rules
+  memory/               # topic files (append durable domain insights)
   tickets/
     BUG-001.md          # YAML frontmatter + markdown body
   learnings/
-    LRN-001.md          # durable cross-agent insights
+    LRN-001.md          # ticket-scoped / legacy one-shot insights
   attachments/
     BUG-001/login.webp  # optimized on ingest
   templates/            # bug.md, feature.md, epic.md
@@ -288,6 +293,7 @@ skips anything already imported).
 ## Web UI
 
 `pine serve` (or `pine open`) serves the UI on `http://127.0.0.1:3412`
+and opens your default browser (`--open=false` to skip).
 (localhost only, with Host/Origin checks — no auth, no external access).
 
 - **Dashboard** — at-a-glance triage lists.
