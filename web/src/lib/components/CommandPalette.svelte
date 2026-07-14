@@ -47,21 +47,65 @@
     item.run();
   }
 
+  function close() {
+    ui.paletteOpen = false;
+  }
+
+  function onOverlayKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') { ui.paletteOpen = false; }
+    if (e.key === 'Escape') { close(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, results.length - 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); }
     else if (e.key === 'Enter') { e.preventDefault(); run(active); }
   }
+
+  function onOptionKey(e: KeyboardEvent, i: number) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      run(i);
+    }
+  }
 </script>
 
 {#if ui.paletteOpen}
-  <div class="overlay" role="dialog" aria-modal="true" onmousedown={(e) => { if (e.target === e.currentTarget) ui.paletteOpen = false; }}>
+  <div
+    class="overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+    tabindex="-1"
+    onmousedown={(e) => { if (e.target === e.currentTarget) close(); }}
+    onkeydown={onOverlayKey}
+  >
     <div class="palette">
-      <input bind:this={inputEl} bind:value={query} onkeydown={onKey} placeholder="Type a command or search…" />
-      <ul>
+      <input
+        bind:this={inputEl}
+        bind:value={query}
+        onkeydown={onKey}
+        placeholder="Type a command or search…"
+        aria-controls="command-palette-list"
+        aria-activedescendant={results[active] ? `command-option-${active}` : undefined}
+        role="combobox"
+        aria-expanded="true"
+        aria-autocomplete="list"
+      />
+      <ul id="command-palette-list" role="listbox">
         {#each results as item, i}
-          <li class:active={i === active} onmousemove={() => (active = i)} onclick={() => run(i)}>
+          <li
+            id={`command-option-${i}`}
+            role="option"
+            aria-selected={i === active}
+            class:active={i === active}
+            onmousemove={() => (active = i)}
+            onclick={() => run(i)}
+            onkeydown={(e) => onOptionKey(e, i)}
+          >
             <span>{item.label}</span>
             {#if item.hint}<kbd>{item.hint}</kbd>{/if}
           </li>

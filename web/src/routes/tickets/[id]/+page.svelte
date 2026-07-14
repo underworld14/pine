@@ -19,7 +19,7 @@
   import FileMentionPopup from '$lib/components/FileMentionPopup.svelte';
   import TicketGraph from '$lib/components/TicketGraph.svelte';
 
-  const id = $derived($page.params.id);
+  const id = $derived($page.params.id ?? '');
   const ticket = $derived(workspace.get(id));
   // Off-branch tickets are read-only: every mutation is gated below and the
   // server would 409 anyway. The editor stays in preview.
@@ -180,6 +180,11 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && lightbox) {
+      e.preventDefault();
+      lightbox = null;
+      return;
+    }
     if (readOnly) return;
     if (e.key === 'Escape' && fileMention.open) {
       e.preventDefault();
@@ -411,7 +416,7 @@
     {/if}
 
     {#if conflict}
-      <div class="conflict">
+      <div class="conflict" data-testid="conflict-banner" role="alert">
         ⚠ Changed on disk (probably an AI agent).
         <button onclick={reloadFromDisk}>Reload from disk</button>
         <button onclick={() => save(true)}>Keep mine & overwrite</button>
@@ -432,6 +437,21 @@
             {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
             <span class="edit-hint dim"><kbd>@</kbd> file · <kbd>Esc</kbd> or click outside</span>
           {/if}
+          <label class="attach-btn">
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              hidden
+              data-testid="ticket-attach-input"
+              onchange={(e) => {
+                const input = e.currentTarget as HTMLInputElement;
+                if (input.files?.length) uploadFiles(Array.from(input.files));
+                input.value = '';
+              }}
+            />
+            Attach
+          </label>
         {/if}
       </div>
 
@@ -474,7 +494,7 @@
     </div>
 
     {#if ticket.attachments.length}
-      <div class="attachments">
+      <div class="attachments" data-testid="attachments">
         {#each ticket.attachments as a}
           <div class="att">
             {#if !readOnly}
@@ -501,7 +521,20 @@
   </div>
 
   {#if lightbox}
-    <div class="lightbox" onclick={() => (lightbox = null)}>
+    <div
+      class="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Attachment preview"
+      tabindex="-1"
+      onclick={() => (lightbox = null)}
+      onkeydown={(e) => {
+        if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          lightbox = null;
+        }
+      }}
+    >
       <img src={lightbox} alt="attachment" />
     </div>
   {/if}
@@ -581,6 +614,11 @@
   .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 28px; }
   .edit-hint { color: var(--color-dim); font-size: 12px; }
   .edit-hint.dim { margin-left: auto; opacity: 0.75; }
+  .attach-btn {
+    font-size: 12px; color: var(--color-dim); cursor: pointer;
+    padding: 4px 8px; border-radius: 6px; border: 1px solid var(--color-border);
+  }
+  .attach-btn:hover { color: var(--color-text); background: var(--color-surface-2); }
   .done {
     background: var(--color-accent-soft);
     color: var(--color-accent);

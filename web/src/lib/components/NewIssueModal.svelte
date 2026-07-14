@@ -233,11 +233,22 @@
 </script>
 
 {#if ui.modalOpen}
-  <div class="overlay" role="dialog" aria-modal="true" onmousedown={(e) => { if (e.target === e.currentTarget) ui.closeModal(); }}>
-    <div class="modal" onkeydown={onKey} onpaste={onPaste} ondragover={(e) => e.preventDefault()} ondrop={onDrop} role="document">
+  <div
+    class="overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="New issue"
+    tabindex="-1"
+    onmousedown={(e) => { if (e.target === e.currentTarget) ui.closeModal(); }}
+    onkeydown={onKey}
+    onpaste={onPaste}
+    ondragover={(e) => e.preventDefault()}
+    ondrop={onDrop}
+  >
+    <form class="modal" onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <div class="types">
         {#each [['bug', '🐛 Bug'], ['feature', '✦ Feature'], ['epic', '❖ Epic']] as [val, label]}
-          <button class="typebtn" class:active={type === val} onclick={() => (type = val)}>{label}</button>
+          <button type="button" class="typebtn" class:active={type === val} onclick={() => (type = val)}>{label}</button>
         {/each}
         <span class="hint"><kbd>Esc</kbd> cancel · <kbd>⌘↵</kbd> create</span>
       </div>
@@ -254,10 +265,15 @@
       <div class="controls">
         <div class="seg">
           {#each ['low', 'medium', 'high', 'critical'] as p}
-            <button class:active={priority === p} onclick={() => (priority = p)}>{p}</button>
+            <button type="button" class:active={priority === p} onclick={() => (priority = p)}>{p}</button>
           {/each}
         </div>
-        <input bind:value={labelsRaw} class="labels" placeholder="labels, comma separated" />
+        <input
+          bind:value={labelsRaw}
+          class="labels"
+          placeholder="labels, comma separated"
+          onkeydown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+        />
       </div>
       {#if staged.length}
         <div class="staged">
@@ -267,20 +283,20 @@
                 <img class="preview" src={previewUrl(s.file)} alt={s.file.name} />
               {/if}
               <span class="name">{s.file.name}</span>
-              <button class="rm" onclick={() => removeStaged(i)} aria-label="Remove">×</button>
+              <button type="button" class="rm" onclick={() => removeStaged(i)} aria-label="Remove">×</button>
             </div>
           {/each}
         </div>
       {/if}
       <div class="foot">
         <label class="attach">
-          <input type="file" accept="image/*,video/*" multiple onchange={onPick} hidden />
+          <input type="file" accept="image/*,video/*" multiple onchange={onPick} hidden data-testid="modal-attach-input" />
           Attach files
         </label>
         <span class="tip">or paste (⌘V) / drop a screenshot</span>
-        <button class="create" disabled={!title.trim() || saving} onclick={submit}>{saving ? 'Creating…' : 'Create'}</button>
+        <button type="submit" class="create" disabled={!title.trim() || saving}>{saving ? 'Creating…' : 'Create'}</button>
       </div>
-    </div>
+    </form>
   </div>
 
   {#if fileMention.open}

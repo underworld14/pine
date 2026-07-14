@@ -48,9 +48,9 @@
   }
 </script>
 
-<div class="board">
+<div class="board" data-testid="board">
   {#each cols as col, ci (col.status)}
-    <section class="col">
+    <section class="col" data-testid={`col-${col.status}`}>
       <header>
         <span>{col.title}</span>
         <span class="count">{col.items.length}</span>
@@ -58,6 +58,7 @@
       </header>
       <div
         class="list"
+        data-testid={`col-list-${col.status}`}
         use:dndzone={{ items: col.items, flipDurationMs: FLIP, dropTargetStyle: {} }}
         onconsider={(e) => handleConsider(ci, e)}
         onfinalize={(e) => handleFinalize(ci, e)}

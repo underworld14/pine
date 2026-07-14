@@ -1,4 +1,4 @@
-.PHONY: web build build-dev dev test test-go cover test-web e2e clean lint fmt
+.PHONY: web build build-dev dev test test-go cover test-web check-web e2e clean lint fmt
 
 VERSION ?= 0.1.0-dev
 LDFLAGS := -X main.version=$(VERSION)
@@ -33,6 +33,9 @@ cover:
 
 test-web:
 	cd web && npm test
+
+check-web:
+	cd web && npm run check
 
 e2e:
 	cd web && npm run test:e2e

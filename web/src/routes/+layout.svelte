@@ -62,8 +62,14 @@
         </div>
       {/if}
       <div class="statusbar">
-        <span class="dot" class:live={workspace.connection === 'live'} class:down={workspace.connection === 'down'}></span>
-        <span class="conn">{workspace.connection}</span>
+        <span
+          class="dot"
+          class:live={workspace.connection === 'live'}
+          class:down={workspace.connection === 'down'}
+          data-testid="sync-dot"
+          data-connection={workspace.connection}
+        ></span>
+        <span class="conn" data-testid="sync-status">{workspace.connection}</span>
         <button class="theme" onclick={() => ui.toggleTheme()} aria-label="Toggle theme">{ui.theme === 'dark' ? '🌙' : '☀️'}</button>
       </div>
     </div>
