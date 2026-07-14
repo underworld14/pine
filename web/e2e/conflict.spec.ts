@@ -31,9 +31,10 @@ test('dirty editor shows conflict banner when disk changes', async ({ page, requ
   await expect(banner.getByRole('button', { name: 'Reload from disk' })).toBeVisible();
   await expect(banner.getByRole('button', { name: 'Keep mine & overwrite' })).toBeVisible();
 
-  // Conflict controls are excluded from click-outside finishEdit, so we stay in edit mode.
   await banner.getByRole('button', { name: 'Reload from disk' }).click();
   await expect(banner).toBeHidden({ timeout: 10000 });
-  // textarea value lives in the value property — toContainText would see "".
-  await expect(textarea).toHaveValue(/Changed on disk by agent/);
+
+  // Leave edit mode so we assert rendered preview text (not textarea value).
+  await page.locator('body').press('Escape');
+  await expect(page.locator('.preview')).toContainText('Changed on disk by agent');
 });

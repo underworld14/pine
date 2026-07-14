@@ -217,12 +217,21 @@
     finishEdit();
   }
 
-  function reloadFromDisk() {
+  async function reloadFromDisk() {
     if (!conflict) return;
-    text = conflict.body ?? '';
-    baseBody = conflict.body ?? '';
-    baseHash = conflict.hash;
-    workspace.tickets = { ...workspace.tickets, [conflict.id]: conflict };
+    const conflicted = conflict;
+    // Prefer a fresh GET: snapshot/SSE copies can omit body depending on path,
+    // and Reload must always restore the on-disk markdown.
+    let disk = conflicted;
+    try {
+      disk = await api.getTicket(conflicted.id);
+    } catch {
+      /* keep conflicted snapshot */
+    }
+    text = disk.body ?? '';
+    baseBody = disk.body ?? '';
+    baseHash = disk.hash;
+    workspace.tickets = { ...workspace.tickets, [disk.id]: disk };
     conflict = null;
   }
 
