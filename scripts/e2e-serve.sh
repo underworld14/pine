@@ -10,4 +10,4 @@ git init -q
 git -c user.email=e2e@pine.test -c user.name=e2e commit -q --allow-empty -m init
 "$ROOT/pine" init >/dev/null
 "$ROOT/pine" create --type feature --title "Seed feature" >/dev/null
-exec "$ROOT/pine" serve --port 3413
+exec "$ROOT/pine" serve --port 3413 --open=false

@@ -164,7 +164,9 @@
   }
 
   async function finishEdit() {
-    if (dirty) save();
+    // Never auto-save while a conflict is unresolved — a concurrent PATCH with the
+    // stale If-Match would 409 and re-raise the banner (race with Reload click).
+    if (dirty && !conflict) save();
     fileMention.close();
     mode = 'preview';
     await fitPreview();
@@ -209,6 +211,7 @@
     if (readOnly || mode === 'preview') return;
     const t = e.target as HTMLElement | null;
     if (t?.closest('[data-file-mention]')) return;
+    if (t?.closest('[data-testid="conflict-banner"]')) return;
     if (t && editorShellEl?.contains(t)) return;
     fileMention.close();
     finishEdit();

@@ -31,8 +31,9 @@ test('dirty editor shows conflict banner when disk changes', async ({ page, requ
   await expect(banner.getByRole('button', { name: 'Reload from disk' })).toBeVisible();
   await expect(banner.getByRole('button', { name: 'Keep mine & overwrite' })).toBeVisible();
 
-  // Clicking outside the editor shell exits edit mode, so assert on the preview.
+  // Conflict controls are excluded from the click-outside finishEdit path so Reload
+  // does not race with an auto-save that would 409 and re-show the banner.
   await banner.getByRole('button', { name: 'Reload from disk' }).click();
-  await expect(banner).toBeHidden();
-  await expect(page.locator('.preview')).toContainText('Changed on disk by agent');
+  await expect(banner).toBeHidden({ timeout: 10000 });
+  await expect(page.locator('.preview, textarea')).toContainText('Changed on disk by agent');
 });
