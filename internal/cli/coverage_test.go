@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/syncignore"
 	"github.com/underworld14/pine/internal/view"
 )
 
@@ -350,6 +352,103 @@ func TestInitNoWarningWithoutGitignoreRule(t *testing.T) {
 	}
 	if strings.Contains(out, "gitignored") {
 		t.Fatalf("unexpected gitignored warning:\n%s", out)
+	}
+}
+
+func TestInitLocalTicketsMessage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "init", "--skip-agents", "--no-sync-tickets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "so they're branch-scoped") {
+		t.Fatalf("local tickets should not claim branch-scoped:\n%s", out)
+	}
+	if !strings.Contains(out, "kept local") {
+		t.Fatalf("expected local-tickets message:\n%s", out)
+	}
+	if !strings.Contains(out, "Project memory") {
+		t.Fatalf("expected memory always-committed note:\n%s", out)
+	}
+}
+
+func TestSetupSyncRequiresWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, dir, "setup", "sync", "--no-sync-attachments")
+	if err == nil || !strings.Contains(err.Error(), "pine init") {
+		t.Fatalf("expected missing-workspace error, got %v", err)
+	}
+}
+
+func TestResolveSyncPrefsNonInteractive(t *testing.T) {
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(""))
+	seed := syncignore.Prefs{Tickets: true, Attachments: true}
+	got, err := resolveSyncPrefs(cmd, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != seed {
+		t.Fatalf("got %+v, want %+v", got, seed)
+	}
+	if !strings.Contains(out.String(), "Project memory") {
+		t.Fatalf("expected memory note:\n%s", out.String())
+	}
+}
+
+func TestApplySyncPrefsMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	err := applySyncPrefs(dir, syncignore.Default())
+	if err == nil {
+		t.Fatal("expected error when config.json is missing")
+	}
+}
+
+func TestSetupSyncOutsideGitRepo(t *testing.T) {
+	dir := t.TempDir() // no .git
+	pine := filepath.Join(dir, ".pine")
+	if err := os.MkdirAll(pine, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Default("x").Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pine, "config.json"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "setup", "sync", "--sync-tickets", "--sync-attachments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "tickets=on") || !strings.Contains(out, "attachments=on") {
+		t.Fatalf("expected sync summary:\n%s", out)
+	}
+	gi, err := os.ReadFile(filepath.Join(pine, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(gi), "tickets/") || strings.Contains(string(gi), "attachments/") {
+		t.Fatalf("both should be tracked:\n%s", gi)
+	}
+}
+
+func TestSyncMessageBothTracked(t *testing.T) {
+	msg := syncMessage(syncignore.Prefs{Tickets: true, Attachments: true})
+	if !strings.Contains(msg, "branch-scoped") {
+		t.Fatalf("expected branch-scoped message:\n%s", msg)
+	}
+	if strings.Contains(msg, "Attachments stay local") {
+		t.Fatalf("should omit attachments-local note:\n%s", msg)
 	}
 }
 

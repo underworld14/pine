@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/underworld14/pine/internal/tui"
+	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/doctor"
 	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/tui"
 	"github.com/underworld14/pine/internal/view"
 )
 
@@ -50,10 +51,28 @@ func TestInitCreatesStructure(t *testing.T) {
 		".pine/config.json", ".pine/board.json",
 		".pine/templates/bug.md", ".pine/prompts/fix.md",
 		".pine/learnings",
+		".pine/.gitignore",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+	gi, err := os.ReadFile(filepath.Join(dir, ".pine", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gi), "attachments/") {
+		t.Errorf("default init should ignore attachments:\n%s", gi)
+	}
+	if strings.Contains(string(gi), "tickets/") {
+		t.Errorf("default init should track tickets:\n%s", gi)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ".pine", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Sync.Tickets || cfg.Sync.Attachments {
+		t.Errorf("config.sync = %+v, want tickets on / attachments off", cfg.Sync)
 	}
 	// init is idempotent.
 	out, err := run(t, dir, "init", "--skip-agents")
@@ -62,6 +81,55 @@ func TestInitCreatesStructure(t *testing.T) {
 	}
 	if !strings.Contains(out, "exists") {
 		t.Errorf("second init should report existing files:\n%s", out)
+	}
+}
+
+func TestInitSyncFlags(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "init", "--skip-agents", "--no-sync-tickets", "--sync-attachments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "tickets=off") || !strings.Contains(out, "attachments=on") {
+		t.Errorf("expected sync summary in output:\n%s", out)
+	}
+	gi, err := os.ReadFile(filepath.Join(dir, ".pine", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gi), "tickets/") {
+		t.Errorf("expected tickets/ ignore:\n%s", gi)
+	}
+	if strings.Contains(string(gi), "attachments/") {
+		t.Errorf("attachments should be tracked:\n%s", gi)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ".pine", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Tickets || !cfg.Sync.Attachments {
+		t.Errorf("config.sync = %+v", cfg.Sync)
+	}
+}
+
+func TestSetupSyncFlags(t *testing.T) {
+	dir := initRepo(t)
+	out, err := run(t, dir, "setup", "sync", "--no-sync-tickets", "--no-sync-attachments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "tickets=off") {
+		t.Errorf("expected summary:\n%s", out)
+	}
+	gi, err := os.ReadFile(filepath.Join(dir, ".pine", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gi), "tickets/") || !strings.Contains(string(gi), "attachments/") {
+		t.Errorf("expected both ignores:\n%s", gi)
 	}
 }
 

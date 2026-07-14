@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/learning"
 	"github.com/underworld14/pine/internal/store"
+	"github.com/underworld14/pine/internal/syncignore"
 	"github.com/underworld14/pine/internal/ticket"
 )
 
@@ -369,17 +371,51 @@ func checkMergeDriver(r *Report, pineRoot string) {
 func checkGitignore(r *Report, pineRoot string) {
 	repoRoot := filepath.Dir(pineRoot)
 	f, err := os.Open(filepath.Join(repoRoot, ".gitignore"))
+	if err == nil {
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			trimmed := strings.TrimSuffix(strings.TrimPrefix(line, "/"), "/")
+			if trimmed == ".pine" {
+				r.warn(".pine is gitignored — Pine data is meant to be committed")
+				return
+			}
+		}
+	}
+
+	// Nested .pine/.gitignore may intentionally ignore attachments/ (default)
+	// or tickets/ when sync.tickets is false. Only warn on unexpected ticket ignore.
+	nested, err := os.ReadFile(filepath.Join(pineRoot, ".gitignore"))
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	body := string(nested)
+	ticketsIgnored := nestedIgnoresTickets(body)
+	if !ticketsIgnored {
+		return
+	}
+	cfg, err := config.Load(filepath.Join(pineRoot, "config.json"))
+	if err == nil && !cfg.Sync.Tickets {
+		return // intentional local tickets
+	}
+	r.warn(".pine/tickets/ is gitignored but config expects tracked tickets — run 'pine setup sync' or fix .pine/.gitignore")
+}
+
+func nestedIgnoresTickets(body string) bool {
+	prefs := syncignore.ParseManagedBlock(body)
+	if !prefs.Tickets {
+		return true
+	}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
 		trimmed := strings.TrimSuffix(strings.TrimPrefix(line, "/"), "/")
-		if trimmed == ".pine" {
-			r.warn(".pine is gitignored — Pine data is meant to be committed")
-			return
+		if trimmed == "tickets" {
+			return true
 		}
 	}
+	return false
 }

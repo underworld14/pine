@@ -201,7 +201,14 @@ Everything lives in `.pine/` and is meant to be committed:
     BUG-001/login.webp  # optimized on ingest
   templates/            # bug.md, feature.md, epic.md
   prompts/fix.md        # the pine prompt template
+  .gitignore            # optional: keep tickets/attachments local (see sync)
 ```
+
+By default **tickets** are tracked (branch-scoped with your code) and
+**attachments** stay local via `.pine/.gitignore`. Project memory
+(`MEMORY.md` / `memory/`) is always committed so it follows you across machines.
+Change this later with `pine setup sync`, or pass `--sync-tickets` /
+`--sync-attachments` (and `--no-*`) to `pine init`.
 
 A ticket file:
 
@@ -255,7 +262,8 @@ marks a replacement; `superseded_by` is derived at read time and never stored.
 ## Pine & git branches
 
 Because `.pine/` is committed alongside your code, **tickets are versioned with
-your branches** — exactly like source files. Switching branches changes which
+your branches** — exactly like source files (unless you opt out with
+`pine setup sync` / `--no-sync-tickets`). Switching branches changes which
 tickets you see: a ticket created and committed on `dev` won't appear while
 you're on `main` (it's not lost — it returns on `dev`, or when the branches
 merge). Uncommitted new tickets stay visible across branches, since git leaves

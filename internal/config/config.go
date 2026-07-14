@@ -27,6 +27,7 @@ type Config struct {
 	Git         Git          `json:"git"`
 	IDStyle     string       `json:"idStyle"` // "hash" (default) | "sequential"
 	CrossBranch CrossBranch  `json:"crossBranch"`
+	Sync        Sync         `json:"sync"`
 
 	// Extra holds unknown top-level keys, preserved verbatim on save.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -65,6 +66,14 @@ type CrossBranch struct {
 	ActiveBranchDays int  `json:"activeBranchDays"` // only branches touched within N days
 }
 
+// Sync controls whether tickets/ and attachments/ under .pine/ are tracked by
+// git. MEMORY.md and memory/ are always tracked and are not part of Sync.
+// Defaults: tickets tracked, attachments local (gitignored via .pine/.gitignore).
+type Sync struct {
+	Tickets     bool `json:"tickets"`
+	Attachments bool `json:"attachments"`
+}
+
 var prefixRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*$`)
 
 // Default returns the configuration pine init writes for a fresh project.
@@ -82,6 +91,7 @@ func Default(projectName string) *Config {
 		Git:         Git{Backend: "auto"},
 		IDStyle:     "hash",
 		CrossBranch: CrossBranch{Enabled: true, ActiveBranchDays: 30},
+		Sync:        Sync{Tickets: true, Attachments: false},
 	}
 }
 
@@ -141,6 +151,8 @@ func parseOnto(c *Config, data []byte) (*Config, error) {
 			_ = json.Unmarshal(raw, &c.IDStyle)
 		case "crossBranch":
 			_ = json.Unmarshal(raw, &c.CrossBranch)
+		case "sync":
+			_ = json.Unmarshal(raw, &c.Sync)
 		default:
 			if c.Extra == nil {
 				c.Extra = map[string]json.RawMessage{}
@@ -163,6 +175,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		{"git", c.Git},
 		{"idStyle", c.IDStyle},
 		{"crossBranch", c.CrossBranch},
+		{"sync", c.Sync},
 	}, c.Extra)
 }
 

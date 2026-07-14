@@ -12,6 +12,7 @@ import (
 	"github.com/underworld14/pine/internal/contextgen"
 	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/setup"
+	"github.com/underworld14/pine/internal/syncignore"
 )
 
 // Default template and prompt files written by pine init. The fix prompt reuses
@@ -25,20 +26,31 @@ const (
 )
 
 func newInitCmd() *cobra.Command {
-	var skipAgents bool
+	var (
+		skipAgents        bool
+		syncTickets       = true
+		syncAttachments   = false
+		noSyncTickets     bool
+		noSyncAttachments bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a .pine workspace in this repository",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInit(cmd, skipAgents)
+			return runInit(cmd, skipAgents, syncPrefsFromFlags(syncTickets, noSyncTickets, syncAttachments, noSyncAttachments))
 		},
 	}
-	cmd.Flags().BoolVar(&skipAgents, "skip-agents", false, "skip the coding-agent setup wizard")
+	f := cmd.Flags()
+	f.BoolVar(&skipAgents, "skip-agents", false, "skip the coding-agent setup wizard")
+	f.BoolVar(&syncTickets, "sync-tickets", true, "track .pine/tickets in git")
+	f.BoolVar(&noSyncTickets, "no-sync-tickets", false, "keep .pine/tickets local (gitignored)")
+	f.BoolVar(&syncAttachments, "sync-attachments", false, "track .pine/attachments in git")
+	f.BoolVar(&noSyncAttachments, "no-sync-attachments", false, "keep .pine/attachments local (gitignored)")
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, skipAgents bool) error {
+func runInit(cmd *cobra.Command, skipAgents bool, syncSeed syncignore.Prefs) error {
 	w := cmd.OutOrStdout()
 	base, err := filepath.Abs(flagDir)
 	if err != nil {
@@ -94,7 +106,26 @@ func runInit(cmd *cobra.Command, skipAgents bool) error {
 	} else if ignored, rule := pineIgnored(root); ignored {
 		fmt.Fprintf(w, "warning: .pine appears to be gitignored (%q); Pine data is meant to be committed\n", rule)
 	}
-	fmt.Fprintln(w, "\nTickets are committed with your code, so they're branch-scoped — see \"Pine & git branches\" in the README.")
+
+	// Sync prefs: interactive checklist, or non-interactive flag defaults.
+	prefs := syncSeed
+	if setup.IsInteractive(cmd.InOrStdin()) {
+		fmt.Fprintln(w)
+		var err error
+		prefs, err = resolveSyncPrefs(cmd, syncSeed)
+		if err != nil {
+			fmt.Fprintf(w, "warning: sync setup skipped (%v). Run 'pine setup sync' later.\n", err)
+			prefs = syncSeed
+		}
+	} else {
+		fmt.Fprintln(w, "Project memory (MEMORY.md / memory/) is always committed for cross-machine use.")
+	}
+	if err := applySyncPrefs(pineDir, prefs); err != nil {
+		return err
+	}
+	printSyncSummary(cmd, prefs)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, syncMessage(prefs))
 
 	if !skipAgents && createdAny {
 		fmt.Fprintln(w)

@@ -159,6 +159,50 @@ func TestCrossBranchValidation(t *testing.T) {
 	}
 }
 
+func TestSyncDefaultsAndRoundTrip(t *testing.T) {
+	c := Default("x")
+	if !c.Sync.Tickets || c.Sync.Attachments {
+		t.Errorf("default sync = %+v, want {tickets:true attachments:false}", c.Sync)
+	}
+	out, err := c.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"sync"`) || !strings.Contains(string(out), `"tickets"`) {
+		t.Errorf("sync not serialized:\n%s", out)
+	}
+	if !strings.Contains(string(out), `"attachments": false`) && !strings.Contains(string(out), `"attachments":false`) {
+		t.Errorf("attachments:false should be explicit:\n%s", out)
+	}
+
+	old, err := Parse([]byte(`{"version":1,"project":{"name":"x"},"types":[{"prefix":"BUG","name":"Bug"}],"priorities":["low"],"idStyle":"hash"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.Sync.Tickets || old.Sync.Attachments {
+		t.Errorf("legacy config sync = %+v, want defaults", old.Sync)
+	}
+
+	partial, err := Parse([]byte(`{"sync":{"attachments":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !partial.Sync.Tickets {
+		t.Errorf("tickets should stay true when omitted")
+	}
+	if !partial.Sync.Attachments {
+		t.Errorf("attachments should be true")
+	}
+
+	both, err := Parse([]byte(`{"sync":{"tickets":false,"attachments":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if both.Sync.Tickets || !both.Sync.Attachments {
+		t.Errorf("got %+v", both.Sync)
+	}
+}
+
 func TestConfigValidateCatchesProblems(t *testing.T) {
 	c := Default("x")
 	c.Git.Backend = "svn"

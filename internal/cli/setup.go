@@ -16,8 +16,8 @@ func newSetupCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Manage coding agent integrations (Codex, Claude Code, Gemini, Cursor)",
-		Long:  "Configure coding agents to use Pine. Run 'pine setup agent' for the interactive wizard.",
+		Short: "Manage coding agent integrations and Pine sync options",
+		Long:  "Configure coding agents, git merge driver, and sync prefs. Run 'pine setup agent' or 'pine setup sync'.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if list || check || remove || printT {
 				return runSetup(cmd, setup.AllRecipes, setupFlags{
@@ -35,6 +35,7 @@ func newSetupCmd() *cobra.Command {
 
 	cmd.AddCommand(newSetupAgentCmd())
 	cmd.AddCommand(newSetupMergeCmd())
+	cmd.AddCommand(newSetupSyncCmd())
 	for _, recipe := range setup.AllRecipes {
 		cmd.AddCommand(newSetupRecipeCmd(recipe))
 	}

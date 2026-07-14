@@ -17,13 +17,22 @@ type Choice struct {
 }
 
 // MultiSelect runs a checklist prompt and returns the keys of selected choices.
-// Returns ErrCancelled when the user aborts.
+// At least one choice must be selected. Returns ErrCancelled when the user aborts.
 func MultiSelect(title string, choices []Choice) ([]string, error) {
 	return MultiSelectIO(title, choices, nil, nil)
 }
 
+// MultiSelectAllowEmpty is MultiSelect without the "at least one" requirement.
+func MultiSelectAllowEmpty(title string, choices []Choice) ([]string, error) {
+	return multiSelectIO(title, choices, nil, nil, true)
+}
+
 // MultiSelectIO is MultiSelect with optional input/output overrides.
 func MultiSelectIO(title string, choices []Choice, in io.Reader, out io.Writer) ([]string, error) {
+	return multiSelectIO(title, choices, in, out, false)
+}
+
+func multiSelectIO(title string, choices []Choice, in io.Reader, out io.Writer, allowEmpty bool) ([]string, error) {
 	options := make([]huh.Option[string], 0, len(choices))
 	selected := make([]string, 0, len(choices))
 	for _, c := range choices {
@@ -43,13 +52,15 @@ func MultiSelectIO(title string, choices []Choice, in io.Reader, out io.Writer) 
 		Title(title).
 		Options(options...).
 		Filterable(false).
-		Value(&selected).
-		Validate(func(v []string) error {
+		Value(&selected)
+	if !allowEmpty {
+		field = field.Validate(func(v []string) error {
 			if len(v) == 0 {
 				return fmt.Errorf("select at least one option")
 			}
 			return nil
 		})
+	}
 
 	form := huh.NewForm(huh.NewGroup(field)).WithShowHelp(true)
 	if in != nil {

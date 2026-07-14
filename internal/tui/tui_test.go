@@ -83,3 +83,17 @@ func TestMultiSelectCancelAndError(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestMultiSelectAllowEmpty(t *testing.T) {
+	withRunForm(t, func(*huh.Form) error { return nil })
+	got, err := MultiSelectAllowEmpty("Pick none", []Choice{
+		{Key: "tickets", Label: "Tickets", Description: ".pine/tickets/", Selected: false},
+		{Key: "attachments", Label: "Attachments", Selected: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("allow-empty should keep zero selection, got %#v", got)
+	}
+}

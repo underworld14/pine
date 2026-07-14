@@ -336,6 +336,54 @@ func TestGitignoreNoWarningWhenFileAbsent(t *testing.T) {
 	}
 }
 
+func TestGitignoreNoWarningForNestedAttachmentsOnly(t *testing.T) {
+	s, pine := scaffold(t)
+	body := "# pine:sync begin\n# tickets=on attachments=off\nattachments/\n# pine:sync end\n"
+	if err := os.WriteFile(filepath.Join(pine, ".gitignore"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(s)
+	out := msgs(r)
+	if strings.Contains(out, "is gitignored") || strings.Contains(out, "tickets/") {
+		t.Errorf("attachments-only ignore should not warn:\n%s", out)
+	}
+}
+
+func TestGitignoreWarnsWhenTicketsIgnoredUnexpectedly(t *testing.T) {
+	s, pine := scaffold(t)
+	body := "# pine:sync begin\n# tickets=off attachments=off\ntickets/\nattachments/\n# pine:sync end\n"
+	if err := os.WriteFile(filepath.Join(pine, ".gitignore"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Default config has sync.tickets=true.
+	r := Run(s)
+	if !strings.Contains(msgs(r), "tickets/") {
+		t.Errorf("expected tickets ignore warning:\n%s", msgs(r))
+	}
+}
+
+func TestGitignoreNoWarningWhenTicketsLocalByConfig(t *testing.T) {
+	s, pine := scaffold(t)
+	cfg := config.Default("t")
+	cfg.Sync.Tickets = false
+	cfg.Sync.Attachments = false
+	b, err := cfg.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pine, "config.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "# pine:sync begin\n# tickets=off attachments=off\ntickets/\nattachments/\n# pine:sync end\n"
+	if err := os.WriteFile(filepath.Join(pine, ".gitignore"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(s)
+	if strings.Contains(msgs(r), "tickets/") {
+		t.Errorf("local tickets per config should not warn:\n%s", msgs(r))
+	}
+}
+
 func TestRunReportsInvalidConfigAndBoard(t *testing.T) {
 	pine := filepath.Join(t.TempDir(), ".pine")
 	if err := os.MkdirAll(filepath.Join(pine, "tickets"), 0o755); err != nil {
