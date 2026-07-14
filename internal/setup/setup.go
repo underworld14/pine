@@ -28,13 +28,15 @@ type Runner struct {
 
 // Install writes or updates sections for the given recipes.
 func (r *Runner) Install(recipes []Recipe) error {
+	seenFiles := map[string]bool{}
+	seenSkills := map[string]bool{}
 	for _, recipe := range recipes {
 		info, ok := Lookup(recipe)
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		if info.File != "" {
-			section, err := RenderSection(recipe, r.Version, r.Opts)
+		if info.File != "" && !seenFiles[info.File] {
+			section, err := RenderSection(info.InstructionRecipe(), r.Version, r.Opts)
 			if err != nil {
 				return err
 			}
@@ -43,9 +45,10 @@ func (r *Runner) Install(recipes []Recipe) error {
 				return err
 			}
 			fmt.Fprintf(r.Out, "  installed %s\n", info.File)
+			seenFiles[info.File] = true
 		}
 
-		if info.SkillFile != "" {
+		if info.SkillFile != "" && !seenSkills[info.SkillFile] {
 			status, err := InstallSkillFile(r.Root, info, r.Opts)
 			if err != nil {
 				return err
@@ -53,6 +56,7 @@ func (r *Runner) Install(recipes []Recipe) error {
 			if status == "installed" {
 				fmt.Fprintf(r.Out, "  installed %s\n", info.SkillFile)
 			}
+			seenSkills[info.SkillFile] = true
 		}
 		if info.HookKind != HookKindNone {
 			status, label, err := installHook(r.Root, info.HookKind)
@@ -74,7 +78,7 @@ func (r *Runner) Remove(recipes []Recipe) error {
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		if info.File != "" {
+		if info.OwnsInstruction() && info.File != "" {
 			path := filepath.Join(r.Root, info.File)
 			removed, err := RemoveSection(path)
 			if err != nil {
@@ -86,7 +90,7 @@ func (r *Runner) Remove(recipes []Recipe) error {
 				fmt.Fprintf(r.Out, "  no pine section in %s\n", info.File)
 			}
 		}
-		if info.SkillFile != "" {
+		if info.OwnsInstruction() && info.SkillFile != "" {
 			if ok, err := RemoveSkillFile(r.Root, info); err != nil {
 				return err
 			} else if ok {
@@ -113,16 +117,15 @@ func (r *Runner) Check(recipes []Recipe) error {
 			return errUnknownRecipe(recipe)
 		}
 		if info.File != "" {
-			section, err := RenderSection(recipe, r.Version, r.Opts)
+			sectionRecipe := info.InstructionRecipe()
+			section, err := RenderSection(sectionRecipe, r.Version, r.Opts)
 			if err != nil {
 				return err
 			}
 			body, _, _ := ExtractSection(section)
 			path := filepath.Join(r.Root, info.File)
-			status := CheckFile(path, body, recipe, r.Version)
+			status := CheckFile(path, body, sectionRecipe, r.Version)
 			fmt.Fprintf(r.Out, "  %s (%s): %s\n", info.Label, info.File, status)
-		} else {
-			fmt.Fprintf(r.Out, "  %s: (hooks only)\n", info.Label)
 		}
 		if info.SkillFile != "" {
 			fmt.Fprintf(r.Out, "  %s: %s\n", info.SkillFile, CheckSkillFile(r.Root, info, r.Opts))
@@ -138,22 +141,24 @@ func (r *Runner) Check(recipes []Recipe) error {
 // Print writes rendered sections to Out.
 func (r *Runner) Print(recipes []Recipe) error {
 	printed := 0
+	seenFiles := map[string]bool{}
 	for _, recipe := range recipes {
 		info, ok := Lookup(recipe)
 		if !ok {
 			return errUnknownRecipe(recipe)
 		}
-		if info.File == "" {
+		if info.File == "" || seenFiles[info.File] {
 			continue
 		}
 		if printed > 0 {
 			fmt.Fprintln(r.Out, "---")
 		}
-		section, err := RenderSection(recipe, r.Version, r.Opts)
+		section, err := RenderSection(info.InstructionRecipe(), r.Version, r.Opts)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(r.Out, section)
+		seenFiles[info.File] = true
 		printed++
 	}
 	return nil
@@ -162,11 +167,7 @@ func (r *Runner) Print(recipes []Recipe) error {
 // List prints available recipes.
 func (r *Runner) List() {
 	for _, info := range Registry() {
-		file := info.File
-		if file == "" {
-			file = "(hooks only)"
-		}
-		fmt.Fprintf(r.Out, "  %-8s %s — %s\n", info.Name, file, info.Description)
+		fmt.Fprintf(r.Out, "  %-8s %s — %s\n", info.Name, info.Label, info.Description)
 	}
 }
 
@@ -197,7 +198,7 @@ func (r *Runner) Wizard(hasPine bool) ([]Recipe, error) {
 		return nil, err
 	}
 	if len(recipes) == 0 {
-		return nil, fmt.Errorf("no tools selected")
+		return nil, fmt.Errorf("no agents selected")
 	}
 	return recipes, nil
 }
@@ -228,15 +229,11 @@ func (r *Runner) pickRecipes(infos []RecipeInfo) ([]Recipe, error) {
 		keys []string
 		err  error
 	)
+	const wizardTitle = "Pine agent setup — choose agents to integrate:"
 	if r.MultiSelect != nil {
-		keys, err = r.MultiSelect("Pine agent setup — choose tools to integrate:", choices)
+		keys, err = r.MultiSelect(wizardTitle, choices)
 	} else {
-		keys, err = tui.MultiSelectIO(
-			"Pine agent setup — choose tools to integrate:",
-			choices,
-			r.In,
-			r.Out,
-		)
+		keys, err = tui.MultiSelectIO(wizardTitle, choices, r.In, r.Out)
 	}
 	if err != nil {
 		return nil, err

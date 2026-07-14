@@ -12,8 +12,11 @@
   import {
     insertAtCursor,
     replaceAll,
+    stripAttachmentMarkdown,
     uploadingPlaceholder
   } from '$lib/insert-at-cursor';
+  import { FileMentionController } from '$lib/file-mention-controller.svelte';
+  import FileMentionPopup from '$lib/components/FileMentionPopup.svelte';
   import TicketGraph from '$lib/components/TicketGraph.svelte';
 
   const id = $derived($page.params.id);
@@ -22,6 +25,8 @@
   // server would 409 anyway. The editor stays in preview.
   const readOnly = $derived(!!ticket?.readOnly);
 
+  const MIN_PANE = 120;
+
   let mode = $state<'preview' | 'split' | 'edit'>('preview');
   let text = $state('');
   let baseHash = $state('');
@@ -29,8 +34,44 @@
   let dirty = $derived(text !== baseBody);
   let conflict = $state<Ticket | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let editorShellEl = $state<HTMLDivElement | null>(null);
+  let previewEl = $state<HTMLDivElement | null>(null);
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  // Locked content height so preview ↔ edit don't jump. Null = size to content.
+  let paneHeight = $state<number | null>(null);
+  let lightbox = $state<string | null>(null);
+  const fileMention = new FileMentionController();
 
+  /** Size the textarea to its content and sync paneHeight (allows shrink). */
+  function fitTextarea() {
+    const el = textareaEl;
+    if (!el) return;
+    el.style.height = 'auto';
+    const h = Math.max(Math.round(el.scrollHeight), MIN_PANE);
+    el.style.height = `${h}px`;
+    paneHeight = h;
+  }
+
+  /** Measure natural preview height (without a stale fixed lock). */
+  async function fitPreview() {
+    paneHeight = null;
+    await tick();
+    const el = previewEl;
+    if (!el) return;
+    paneHeight = Math.max(Math.round(el.scrollHeight), MIN_PANE);
+  }
+
+  // Keep paneHeight in sync when the user vertically resizes the textarea.
+  $effect(() => {
+    const el = textareaEl;
+    if (!el || mode === 'preview') return;
+    const ro = new ResizeObserver(() => {
+      const h = Math.round(el.offsetHeight);
+      if (h > 0 && h !== paneHeight) paneHeight = h;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   // Load / rebase when the ticket identity or disk version changes.
   $effect(() => {
     const t = ticket;
@@ -59,6 +100,7 @@
       baseBody = '';
       conflict = null;
       mode = 'preview';
+      paneHeight = null;
     }
   });
 
@@ -92,20 +134,40 @@
 
   function onEdit() {
     if (readOnly) return;
+    fitTextarea();
+    fileMention.onInput(textareaEl, text);
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { if (dirty) save(); }, 2000);
+  }
+
+  function onTextareaKeydown(e: KeyboardEvent) {
+    if (readOnly) return;
+    const consumed = fileMention.onKeydown(e, textareaEl, text, (next, caret) => {
+      text = next;
+      tick().then(() => {
+        fitTextarea();
+        textareaEl?.focus();
+        textareaEl?.setSelectionRange(caret, caret);
+      });
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { if (dirty) save(); }, 2000);
+    });
+    if (consumed) return;
   }
 
   async function startEdit(next: 'edit' | 'split' = 'edit') {
     if (readOnly) return;
     mode = next;
     await tick();
+    fitTextarea();
     textareaEl?.focus();
   }
 
-  function finishEdit() {
+  async function finishEdit() {
     if (dirty) save();
+    fileMention.close();
     mode = 'preview';
+    await fitPreview();
   }
 
   function onPreviewDblClick(e: MouseEvent) {
@@ -119,6 +181,11 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (readOnly) return;
+    if (e.key === 'Escape' && fileMention.open) {
+      e.preventDefault();
+      fileMention.close();
+      return;
+    }
     if (e.key === 'Escape' && mode !== 'preview') {
       e.preventDefault();
       finishEdit();
@@ -131,6 +198,15 @@
       else if (mode === 'edit') startEdit('split');
       else finishEdit();
     }
+  }
+
+  function onPointerDown(e: PointerEvent) {
+    if (readOnly || mode === 'preview') return;
+    const t = e.target as HTMLElement | null;
+    if (t?.closest('[data-file-mention]')) return;
+    if (t && editorShellEl?.contains(t)) return;
+    fileMention.close();
+    finishEdit();
   }
 
   function reloadFromDisk() {
@@ -218,6 +294,7 @@
     }
     text = value;
     await tick();
+    fitTextarea();
     textareaEl?.focus();
     textareaEl?.setSelectionRange(caret, caret);
 
@@ -230,6 +307,8 @@
         else next = replaceAll(next, placeholders[i], '');
       }
       text = next.replace(/\n{3,}/g, '\n\n');
+      await tick();
+      fitTextarea();
       const ok = results.filter((r) => !r.error);
       if (ok.length) {
         await save();
@@ -258,10 +337,26 @@
     if (imgs.length) { e.preventDefault(); uploadFiles(imgs); }
   }
 
-  let lightbox = $state<string | null>(null);
+  async function removeAttachment(name: string) {
+    if (!ticket || readOnly || !id) return;
+    try {
+      await api.deleteAttachment(id, name, workspace.beginOp());
+      const next = stripAttachmentMarkdown(text, id, name);
+      if (next !== text) {
+        text = next;
+        await save();
+      }
+      if (lightbox?.includes(encodeURIComponent(name)) || lightbox?.endsWith('/' + name)) {
+        lightbox = null;
+      }
+      toasts.push('Attachment removed', 'success');
+    } catch (err) {
+      toasts.push(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
+  }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpointerdown={onPointerDown} />
 
 {#if !ticket}
   <div class="missing">Ticket <span class="mono">{id}</span> not found. <a href="/board">Back to board</a></div>
@@ -323,58 +418,74 @@
       </div>
     {/if}
 
-    <div class="editor-head">
-      {#if !readOnly}
-        {#if mode === 'preview'}
-          <span class="edit-hint">Double-click to edit · <kbd>⌘E</kbd></span>
-        {:else}
-          <button class="done" onclick={finishEdit}>Done</button>
-          <div class="modes">
-            <button class:active={mode === 'edit'} onclick={() => startEdit('edit')}>Edit</button>
-            <button class:active={mode === 'split'} onclick={() => startEdit('split')}>Split</button>
-          </div>
-          {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
-          <span class="edit-hint dim"><kbd>Esc</kbd> to preview</span>
+    <div class="editor-shell" bind:this={editorShellEl}>
+      <div class="editor-head">
+        {#if !readOnly}
+          {#if mode === 'preview'}
+            <span class="edit-hint">Double-click to edit · <kbd>⌘E</kbd></span>
+          {:else}
+            <button class="done" onclick={finishEdit}>Done</button>
+            <div class="modes">
+              <button class:active={mode === 'edit'} onclick={() => startEdit('edit')}>Edit</button>
+              <button class:active={mode === 'split'} onclick={() => startEdit('split')}>Split</button>
+            </div>
+            {#if dirty}<span class="dirty">unsaved · <kbd>⌘S</kbd></span>{/if}
+            <span class="edit-hint dim"><kbd>@</kbd> file · <kbd>Esc</kbd> or click outside</span>
+          {/if}
         {/if}
-      {/if}
-    </div>
+      </div>
 
-    <div
-      class="editor"
-      class:split={mode === 'split' && !readOnly}
-      class:editing={mode !== 'preview' && !readOnly}
-      class:previewing={mode === 'preview' || readOnly}
-    >
-      {#if mode !== 'preview' && !readOnly}
-        <textarea
-          bind:this={textareaEl}
-          bind:value={text}
-          oninput={onEdit}
-          spellcheck="false"
-          placeholder="# Description&#10;&#10;Write the ticket body in Markdown…"
-        ></textarea>
-      {/if}
-      {#if mode !== 'edit' || readOnly}
-        <div
-          class="preview"
-          class:editable={!readOnly && mode === 'preview'}
-          role={!readOnly && mode === 'preview' ? 'button' : undefined}
-          tabindex={!readOnly && mode === 'preview' ? 0 : undefined}
-          title={!readOnly && mode === 'preview' ? 'Double-click to edit' : undefined}
-          ondblclick={onPreviewDblClick}
-          onkeydown={(e) => {
-            if (readOnly || mode !== 'preview') return;
-            if (e.key === 'Enter') { e.preventDefault(); startEdit('edit'); }
-          }}
-          onchange={onChecklistChange}
-        >{@html readOnly || dirty ? preview.replaceAll('<input ', '<input disabled ') : preview}</div>
-      {/if}
+      <div
+        class="editor"
+        class:split={mode === 'split' && !readOnly}
+        class:editing={mode !== 'preview' && !readOnly}
+        class:previewing={mode === 'preview' || readOnly}
+        class:height-locked={paneHeight != null}
+      >
+        {#if mode !== 'preview' && !readOnly}
+          <textarea
+            bind:this={textareaEl}
+            bind:value={text}
+            oninput={onEdit}
+            onkeydown={onTextareaKeydown}
+            spellcheck="false"
+            placeholder="# Description&#10;&#10;Write the ticket body in Markdown…&#10;&#10;Type @ to link a file"
+            style:height={paneHeight ? `${paneHeight}px` : undefined}
+          ></textarea>
+        {/if}
+        {#if mode !== 'edit' || readOnly}
+          <div
+            class="preview"
+            class:editable={!readOnly && mode === 'preview'}
+            bind:this={previewEl}
+            role={!readOnly && mode === 'preview' ? 'button' : undefined}
+            tabindex={!readOnly && mode === 'preview' ? 0 : undefined}
+            title={!readOnly && mode === 'preview' ? 'Double-click to edit' : undefined}
+            ondblclick={onPreviewDblClick}
+            onkeydown={(e) => {
+              if (readOnly || mode !== 'preview') return;
+              if (e.key === 'Enter') { e.preventDefault(); startEdit('edit'); }
+            }}
+            onchange={onChecklistChange}
+            style:height={paneHeight ? `${paneHeight}px` : undefined}
+          >{@html readOnly || dirty ? preview.replaceAll('<input ', '<input disabled ') : preview}</div>
+        {/if}
+      </div>
     </div>
 
     {#if ticket.attachments.length}
       <div class="attachments">
         {#each ticket.attachments as a}
           <div class="att">
+            {#if !readOnly}
+              <button
+                type="button"
+                class="att-del"
+                title="Remove {a.name}"
+                aria-label="Remove {a.name}"
+                onclick={(e) => { e.stopPropagation(); removeAttachment(a.name); }}
+              >×</button>
+            {/if}
             {#if a.kind === 'image'}
               <button class="imgbtn" onclick={() => (lightbox = a.url)}><img src={a.url} alt={a.name} /></button>
             {:else if a.kind === 'video'}
@@ -392,6 +503,31 @@
   {#if lightbox}
     <div class="lightbox" onclick={() => (lightbox = null)}>
       <img src={lightbox} alt="attachment" />
+    </div>
+  {/if}
+
+  {#if fileMention.open}
+    <div data-file-mention>
+      <FileMentionPopup
+        items={fileMention.items}
+        active={fileMention.active}
+        loading={fileMention.loading}
+        top={fileMention.top}
+        left={fileMention.left}
+        onSelect={(item) =>
+          fileMention.select(item, textareaEl, text, (next, caret) => {
+            text = next;
+            tick().then(() => {
+              fitTextarea();
+              textareaEl?.focus();
+              textareaEl?.setSelectionRange(caret, caret);
+            });
+            if (saveTimer) clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => { if (dirty) save(); }, 2000);
+          })
+        }
+        onHover={(i) => (fileMention.active = i)}
+      />
     </div>
   {/if}
 {/if}
@@ -476,11 +612,11 @@
   .editor {
     border-radius: 10px;
     overflow: hidden;
-    min-height: 280px;
+    min-height: 120px;
     background: var(--color-surface);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
     transition-property: box-shadow, background-color;
-    transition-duration: 150ms;
+    transition-duration: 180ms;
     transition-timing-function: ease-out;
   }
   .editor.previewing { background: transparent; }
@@ -500,16 +636,19 @@
   }
   .editor.split { display: grid; grid-template-columns: 1fr 1fr; }
   textarea {
+    display: block;
     width: 100%;
-    min-height: 280px;
+    min-height: 120px;
+    box-sizing: border-box;
     padding: 16px 18px;
     background: var(--color-surface);
     border: none;
     outline: none;
     resize: vertical;
+    overflow: auto;
     font-family: var(--font-sans);
     font-size: 14px;
-    line-height: 1.65;
+    line-height: 1.7;
     letter-spacing: 0.01em;
   }
   .editor.split textarea {
@@ -518,12 +657,15 @@
     font-size: 13px;
   }
   .preview {
+    box-sizing: border-box;
     padding: 16px 18px;
     font-size: 14px;
     line-height: 1.7;
     overflow: auto;
     text-wrap: pretty;
+    transition: height 180ms ease-out;
   }
+  .editor.height-locked .preview { min-height: 120px; }
   .preview.editable { cursor: text; }
   .preview.editable:focus-visible {
     outline: 2px solid var(--color-accent);
@@ -560,7 +702,32 @@
   :root[data-theme='light'] .preview :global(img) { outline-color: rgba(0, 0, 0, 0.1); }
   .preview :global(a) { color: var(--color-accent); }
   .attachments { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-  .att { display: flex; flex-direction: column; gap: 4px; width: 140px; }
+  .att { position: relative; display: flex; flex-direction: column; gap: 4px; width: 140px; }
+  .att-del {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 2;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.72);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    opacity: 0.85;
+    transition-property: opacity, scale, background-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .att:hover .att-del,
+  .att:focus-within .att-del { opacity: 1; }
+  .att-del:hover { background: var(--color-danger); }
+  .att-del:active { scale: 0.94; }
   .imgbtn {
     padding: 0;
     border: none;

@@ -14,6 +14,7 @@ Something.
 
 - src/login.tsx
 - ` + "`internal/cli/import.go`" + `
+- @internal/server/git.go
 * apps/web/src/lib/x.ts
 
 not a bullet
@@ -24,7 +25,7 @@ not a bullet
 - ignored.md
 `
 	got := RelatedFiles(body)
-	want := []string{"src/login.tsx", "internal/cli/import.go", "apps/web/src/lib/x.ts"}
+	want := []string{"src/login.tsx", "internal/cli/import.go", "internal/server/git.go", "apps/web/src/lib/x.ts"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("RelatedFiles = %#v, want %#v", got, want)
 	}

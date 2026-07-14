@@ -1,5 +1,12 @@
 @import 'tailwindcss';
 
+/*
+  Tailwind v4 is wired via @tailwindcss/vite (see vite.config.ts).
+  Prefer utility classes for new UI; keep tokens here.
+  In component <style lang="postcss"> blocks that need theme()/@apply, add:
+    @reference "tailwindcss";
+*/
+
 /* Midnight Pine — a dense, terminal-adjacent dev tool aesthetic. */
 @theme {
   --color-bg: #0e1210;

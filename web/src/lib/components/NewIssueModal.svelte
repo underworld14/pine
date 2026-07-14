@@ -10,6 +10,9 @@
     rewriteStagedUploads,
     uploadPlaceholder
   } from '$lib/insert-at-cursor';
+  import { FileMentionController } from '$lib/file-mention-controller.svelte';
+  import FileMentionPopup from '$lib/components/FileMentionPopup.svelte';
+  import type { FileSuggestItem } from '$lib/file-mention';
 
   type Staged = { key: string; file: File };
 
@@ -23,6 +26,7 @@
   let titleEl = $state<HTMLInputElement | null>(null);
   let descEl = $state<HTMLTextAreaElement | null>(null);
   let keySeq = 0;
+  const fileMention = new FileMentionController();
 
   // Object-URL previews for staged image files (client-side blobs; work anywhere,
   // including a VS Code webview). Cached per File so we create each URL once.
@@ -57,6 +61,7 @@
       labelsRaw = '';
       staged = [];
       keySeq = 0;
+      fileMention.close();
       queueMicrotask(() => titleEl?.focus());
     }
   });
@@ -159,8 +164,37 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    if (e.key === 'Escape' && fileMention.open) {
+      e.preventDefault();
+      fileMention.close();
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); ui.closeModal(); }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+  }
+
+  function onDescInput() {
+    fileMention.onInput(descEl, description);
+  }
+
+  function onDescKeydown(e: KeyboardEvent) {
+    fileMention.onKeydown(e, descEl, description, (next, caret) => {
+      description = next;
+      tick().then(() => {
+        descEl?.focus();
+        descEl?.setSelectionRange(caret, caret);
+      });
+    });
+  }
+
+  function applyMention(item: FileSuggestItem) {
+    fileMention.select(item, descEl, description, (next, caret) => {
+      description = next;
+      tick().then(() => {
+        descEl?.focus();
+        descEl?.setSelectionRange(caret, caret);
+      });
+    });
   }
 
   function onPaste(e: ClipboardEvent) {
@@ -208,7 +242,15 @@
         <span class="hint"><kbd>Esc</kbd> cancel · <kbd>⌘↵</kbd> create</span>
       </div>
       <input bind:this={titleEl} bind:value={title} class="title" placeholder="Title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
-      <textarea bind:this={descEl} bind:value={description} class="desc" rows="3" placeholder="Description (optional)"></textarea>
+      <textarea
+        bind:this={descEl}
+        bind:value={description}
+        class="desc"
+        rows="3"
+        placeholder="Description (optional) — type @ to link a file"
+        oninput={onDescInput}
+        onkeydown={onDescKeydown}
+      ></textarea>
       <div class="controls">
         <div class="seg">
           {#each ['low', 'medium', 'high', 'critical'] as p}
@@ -240,6 +282,20 @@
       </div>
     </div>
   </div>
+
+  {#if fileMention.open}
+    <div data-file-mention>
+      <FileMentionPopup
+        items={fileMention.items}
+        active={fileMention.active}
+        loading={fileMention.loading}
+        top={fileMention.top}
+        left={fileMention.left}
+        onSelect={applyMention}
+        onHover={(i) => (fileMention.active = i)}
+      />
+    </div>
+  {/if}
 {/if}
 
 <style>

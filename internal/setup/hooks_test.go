@@ -73,23 +73,36 @@ func TestCodexHookIdempotent(t *testing.T) {
 	}
 }
 
-func TestInstallCursorHookOnly(t *testing.T) {
+func TestInstallCursorBundle(t *testing.T) {
 	dir := t.TempDir()
 	r, buf := newTestRunner(dir)
 	if err := r.Install([]Recipe{RecipeCursor}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Fatalf("cursor recipe must not create AGENTS.md, err=%v", err)
+	agentsPath := filepath.Join(dir, "AGENTS.md")
+	data, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("cursor recipe must create AGENTS.md: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".agents", "skills", "pine", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatalf("cursor recipe must not create skill file, err=%v", err)
+	if !strings.Contains(string(data), "pine:begin") || !strings.Contains(string(data), "recipe=agents") {
+		t.Fatalf("AGENTS.md should use shared agents section marker:\n%s", data)
+	}
+	skillPath := filepath.Join(dir, ".agents", "skills", "pine", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("cursor recipe must create skill file: %v", err)
 	}
 	if got := CheckCursorHook(dir); got != StatusCurrent {
 		t.Fatalf("expected Cursor hook current, got %s", got)
 	}
+	// Cursor alone must not install Codex hooks.
+	if _, err := os.Stat(filepath.Join(dir, ".codex", "hooks.json")); !os.IsNotExist(err) {
+		t.Fatalf("cursor install should not create Codex hooks, err=%v", err)
+	}
 	if !strings.Contains(buf.String(), ".cursor/hooks.json") {
 		t.Fatalf("expected cursor hook install output:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "AGENTS.md") {
+		t.Fatalf("expected AGENTS.md install output:\n%s", buf.String())
 	}
 	script := filepath.Join(dir, ".cursor", "hooks", "pine-learn-reminder.sh")
 	fi, err := os.Stat(script)
@@ -99,12 +112,12 @@ func TestInstallCursorHookOnly(t *testing.T) {
 	if fi.Mode()&0o111 == 0 {
 		t.Fatalf("script not executable: %v", fi.Mode())
 	}
-	data, err := os.ReadFile(script)
+	scriptData, err := os.ReadFile(script)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "additional_context") || !strings.Contains(string(data), hookSentinel) {
-		t.Fatalf("script missing reminder payload:\n%s", data)
+	if !strings.Contains(string(scriptData), "additional_context") || !strings.Contains(string(scriptData), hookSentinel) {
+		t.Fatalf("script missing reminder payload:\n%s", scriptData)
 	}
 }
 
@@ -150,6 +163,13 @@ func TestCursorHookIdempotent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".cursor", "hooks", "pine-learn-reminder.sh")); !os.IsNotExist(err) {
 		t.Errorf("Cursor script should be removed, stat err = %v", err)
+	}
+	// Shared AGENTS.md / skill stay; Cursor does not own them.
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Errorf("cursor remove should leave shared AGENTS.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "skills", "pine", "SKILL.md")); err != nil {
+		t.Errorf("cursor remove should leave shared skill: %v", err)
 	}
 }
 

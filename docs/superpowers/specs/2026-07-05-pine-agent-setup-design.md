@@ -1,30 +1,41 @@
 # Pine Agent Setup Design
 
 **Date:** 2026-07-05  
-**Status:** Implemented (docs-only v1)
+**Updated:** 2026-07-14  
+**Status:** Implemented (Beads-style agent recipes)
 
 ## Goal
 
-Give coding agents (Claude Code, Gemini CLI, Codex, Factory, etc.) persistent,
-discoverable instructions for using Pine — similar to Beads' `bd setup`, but
-without hooks or a `pine prime` command in v1.
+Give coding agents (Claude Code, Gemini CLI, Codex, Cursor, …) persistent,
+discoverable instructions for using Pine — similar to Beads' `bd setup`.
 
-## Scope (v1)
+## Model
 
-- Agent wizard runs during `pine init` (skip with `--skip-agents`)
-- Late setup via `pine setup agent`
-- Three targets: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
-- Interactive wizard with checkbox-style toggles
-- Marked HTML-comment sections for idempotent install/update/remove/check
-- Dynamic board-column line when `.pine/` is present
-- No Cursor rules, Codex skill files, or session hooks
+Wizard and CLI are **agent-centric**, not file-centric. Each recipe is one
+agent bundle:
 
-## Out of scope (v2)
+| Recipe (`pine setup …`) | Label | Instructions | Skill | Hook |
+|-------------------------|-------|--------------|-------|------|
+| `agents` | Codex | `AGENTS.md` | `.agents/skills/pine/SKILL.md` | Codex Stop |
+| `claude` | Claude Code | `CLAUDE.md` | `.claude/skills/pine/SKILL.md` | Claude Stop |
+| `gemini` | Gemini CLI | `GEMINI.md` | shared `.agents/skills/pine/` | — |
+| `cursor` | Cursor | `AGENTS.md` (shared marker `recipe=agents`) | shared `.agents/skills/pine/` | Cursor sessionStart |
 
-- `pine prime` + SessionStart hooks
-- `.cursor/rules/pine.mdc`, `.agents/skills/pine/SKILL.md`
-- `pine init --skip-agents` / auto-install on `pine init`
-- `--global` installs
+Cursor shares `AGENTS.md` + skill with Codex via `SectionRecipe`. Removing
+`cursor` removes only Cursor hooks; `pine setup agents --remove` or
+`pine setup --remove` clears shared files.
+
+## Wizard
+
+```
+Pine agent setup — choose agents to integrate:
+  ✓ Codex          (AGENTS.md + skill + Stop hook)
+    Claude Code    (CLAUDE.md + skill + Stop hook)
+    Gemini CLI     (GEMINI.md + shared skill)
+    Cursor         (AGENTS.md + skill + sessionStart hook)
+```
+
+Default selection: Codex. `-y` installs all agents.
 
 ## CLI
 
@@ -32,11 +43,8 @@ without hooks or a `pine prime` command in v1.
 |---------|----------|
 | `pine init` | Create `.pine/` and run agent wizard (unless `--skip-agents`) |
 | `pine setup agent` | Interactive wizard (late setup) |
-| `pine setup agents` | Install `AGENTS.md` only |
-| `pine setup claude` | Install `CLAUDE.md` only |
-| `pine setup gemini` | Install `GEMINI.md` only |
-
-Flags: `--list`, `--check`, `--remove`, `--print` on `pine setup`; `-y` on `pine setup agent`.
+| `pine setup agents\|claude\|gemini\|cursor` | Install one agent bundle |
+| `pine setup --check\|--remove\|--list\|--print` | Operate on all recipes |
 
 ## Marked sections
 
@@ -69,4 +77,5 @@ the write-back rules line.
 ## Testing
 
 - `internal/setup/merge_test.go` — merge, remove, check, render
-- `internal/cli/cli_test.go` — `setup agents`, `setup -y`
+- `internal/setup/hooks_test.go` — Codex/Cursor hooks; Cursor installs shared AGENTS.md
+- `internal/cli/cli_test.go` — `setup agents`, `setup agent -y`

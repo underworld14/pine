@@ -162,7 +162,11 @@ export const api = {
     const q = new URLSearchParams(params).toString();
     return req<{ indexing: boolean; hits: SearchHit[] }>('GET', `/api/search?${q}`);
   },
-  files: (q: string) => req<{ files: string[] }>('GET', `/api/files?q=${encodeURIComponent(q)}`),
+  files: (q: string) =>
+    req<{ items: { path: string; kind: 'file' | 'dir' }[]; files: string[] }>(
+      'GET',
+      `/api/files?q=${encodeURIComponent(q)}`
+    ),
   ticketPrompt: async (id: string) => (await fetch(`/api/tickets/${id}/prompt`)).text(),
   context: async () => (await fetch('/api/context')).text(),
   async upload(id: string, files: File[], opts: { opId?: string; onProgress?: (p: number) => void } = {}): Promise<AttachmentResult[]> {
@@ -183,7 +187,12 @@ export const api = {
       xhr.onerror = () => reject(new Error('network error'));
       xhr.send(form);
     });
-  }
+  },
+  deleteAttachment: (id: string, name: string, opId?: string) =>
+    req<void>(
+      'DELETE',
+      `/api/tickets/${id}/attachments/${encodeURIComponent(name)}${opId ? `?opId=${encodeURIComponent(opId)}` : ''}`
+    )
 };
 
 // PineEventSource wraps EventSource with reconnect/backoff and snapshot resync.

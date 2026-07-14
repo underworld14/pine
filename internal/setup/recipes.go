@@ -1,6 +1,6 @@
 package setup
 
-// Recipe names a target agent instruction file.
+// Recipe names a target agent integration.
 type Recipe string
 
 const (
@@ -23,7 +23,7 @@ const (
 // AllRecipes is the default wizard selection order.
 var AllRecipes = []Recipe{RecipeAgents, RecipeClaude, RecipeGemini, RecipeCursor}
 
-// RecipeInfo describes one integration target.
+// RecipeInfo describes one agent integration bundle.
 type RecipeInfo struct {
 	Name        Recipe
 	File        string
@@ -36,6 +36,25 @@ type RecipeInfo struct {
 	SkillFile string
 	// HookKind is the session-hook target for this recipe, or HookKindNone.
 	HookKind HookKind
+	// SectionRecipe, when set, is the recipe id used in the AGENTS.md/CLAUDE.md
+	// section marker. Cursor shares AGENTS.md with Codex, so it renders and
+	// checks as RecipeAgents while still owning only the Cursor hook on remove.
+	SectionRecipe Recipe
+}
+
+// OwnsInstructionReports whether this recipe owns the instruction file / skill
+// for install-remove. Shared consumers (Cursor → AGENTS.md) do not.
+func (info RecipeInfo) OwnsInstruction() bool {
+	return info.SectionRecipe == "" || info.SectionRecipe == info.Name
+}
+
+// InstructionRecipe is the recipe id used when rendering/checking the
+// instruction file section.
+func (info RecipeInfo) InstructionRecipe() Recipe {
+	if info.SectionRecipe != "" {
+		return info.SectionRecipe
+	}
+	return info.Name
 }
 
 // Registry returns metadata for every built-in recipe.
@@ -44,8 +63,8 @@ func Registry() []RecipeInfo {
 		{
 			Name:        RecipeAgents,
 			File:        "AGENTS.md",
-			Label:       "AGENTS.md",
-			Description: "Codex, Cursor, Factory, and generic coding agents",
+			Label:       "Codex",
+			Description: "AGENTS.md + skill + Stop hook",
 			Header:      "This project uses Pine for issue tracking.",
 			SkillFile:   ".agents/skills/pine/SKILL.md",
 			HookKind:    HookKindCodex,
@@ -53,8 +72,8 @@ func Registry() []RecipeInfo {
 		{
 			Name:        RecipeClaude,
 			File:        "CLAUDE.md",
-			Label:       "CLAUDE.md",
-			Description: "Claude Code",
+			Label:       "Claude Code",
+			Description: "CLAUDE.md + skill + Stop hook",
 			Header:      "Claude Code: read this before working in the repository.",
 			SkillFile:   ".claude/skills/pine/SKILL.md",
 			HookKind:    HookKindClaude,
@@ -62,19 +81,22 @@ func Registry() []RecipeInfo {
 		{
 			Name:        RecipeGemini,
 			File:        "GEMINI.md",
-			Label:       "GEMINI.md",
-			Description: "Gemini CLI",
+			Label:       "Gemini CLI",
+			Description: "GEMINI.md + shared skill",
 			Header:      "Gemini CLI: read this before working in the repository.",
 			// Gemini has no first-class skills dir; reuse the AGENTS skill path so
 			// GEMINI.md's pointer to the full workflow resolves after setup.
 			SkillFile: ".agents/skills/pine/SKILL.md",
 		},
 		{
-			Name:        RecipeCursor,
-			File:        "",
-			Label:       "Cursor hooks",
-			Description: ".cursor/hooks.json (reuses AGENTS.md)",
-			HookKind:    HookKindCursor,
+			Name:          RecipeCursor,
+			File:          "AGENTS.md",
+			Label:         "Cursor",
+			Description:   "AGENTS.md + skill + sessionStart hook",
+			Header:        "This project uses Pine for issue tracking.",
+			SkillFile:     ".agents/skills/pine/SKILL.md",
+			HookKind:      HookKindCursor,
+			SectionRecipe: RecipeAgents,
 		},
 	}
 }

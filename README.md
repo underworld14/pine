@@ -152,12 +152,12 @@ to install instructions for your coding agent (Claude Code, Gemini CLI, Codex,
 Factory, …). Forgot to set it up?
 
 ```sh
-pine setup agent        # interactive wizard
-pine setup agent -y     # install AGENTS.md + CLAUDE.md + GEMINI.md + Cursor hooks
-pine setup agents       # AGENTS.md + Codex Stop hook
-pine setup claude       # CLAUDE.md + Claude Stop hook
-pine setup gemini       # GEMINI.md only
-pine setup cursor       # Cursor sessionStart hook (reuses AGENTS.md)
+pine setup agent        # interactive wizard (pick agents)
+pine setup agent -y     # install all agents (Codex, Claude, Gemini, Cursor)
+pine setup agents       # Codex: AGENTS.md + skill + Stop hook
+pine setup claude       # Claude Code: CLAUDE.md + skill + Stop hook
+pine setup gemini       # Gemini CLI: GEMINI.md + shared skill
+pine setup cursor       # Cursor: AGENTS.md + skill + sessionStart hook
 pine setup --check      # verify sections are current
 pine setup --remove     # strip pine sections
 ```
@@ -168,7 +168,8 @@ Use `pine init --skip-agents` to skip the wizard (e.g. in CI). Each root file
 The full workflow lives in the **pine skill**
 (`.claude/skills/pine/SKILL.md` for Claude Code;
 `.agents/skills/pine/SKILL.md` for Codex / Cursor / Gemini / generic agents).
-Cursor also reads `AGENTS.md` — `pine setup cursor` only adds hooks.
+Cursor reads `AGENTS.md` natively — `pine setup cursor` installs that file,
+the shared skill, and Cursor hooks.
 Re-run `pine setup agent` after upgrading Pine to refresh stale sections.
 
 Setup also installs learn-reminder hooks where the agent supports them:

@@ -72,3 +72,13 @@ export function rewriteStagedUploads(
 export function uploadingPlaceholder(name: string): string {
   return `![Uploading ${name}…]()`;
 }
+
+/** Remove markdown image/link refs that point at one attachment file. */
+export function stripAttachmentMarkdown(body: string, ticketId: string, name: string): string {
+  const escId = ticketId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Disk paths use ../attachments/…; preview/HTML may use /attachments/….
+  const path = `(?:\\.\\./|/)?attachments/${escId}/${escName}`;
+  const re = new RegExp(`!?\\[[^\\]]*\\]\\(${path}\\)`, 'g');
+  return body.replace(re, '').replace(/\n{3,}/g, '\n\n');
+}

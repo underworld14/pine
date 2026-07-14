@@ -16,7 +16,7 @@ func newSetupCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Manage agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor hooks)",
+		Short: "Manage coding agent integrations (Codex, Claude Code, Gemini, Cursor)",
 		Long:  "Configure coding agents to use Pine. Run 'pine setup agent' for the interactive wizard.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if list || check || remove || printT {
@@ -46,7 +46,7 @@ func newSetupAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Interactive wizard to choose coding agent integrations",
-		Long:  "Install or refresh AGENTS.md, CLAUDE.md, GEMINI.md, and Cursor hooks. Also runs automatically during 'pine init'.",
+		Long:  "Install or refresh agent bundles (instructions + skills + hooks). Also runs automatically during 'pine init'.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !yes && !setup.IsInteractive(cmd.InOrStdin()) {
@@ -55,7 +55,7 @@ func newSetupAgentCmd() *cobra.Command {
 			return runAgentWizard(cmd, yes)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install all integrations without prompting")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install all agents without prompting")
 	return cmd
 }
 
@@ -66,13 +66,9 @@ func newSetupRecipeCmd(recipe setup.Recipe) *cobra.Command {
 		printT bool
 	)
 	info, _ := setup.Lookup(recipe)
-	short := fmt.Sprintf("Install or update %s", info.File)
-	if info.File == "" {
-		short = fmt.Sprintf("Install or update %s", info.Label)
-	}
 	cmd := &cobra.Command{
 		Use:   string(recipe),
-		Short: short,
+		Short: fmt.Sprintf("Install or update %s (%s)", info.Label, info.Description),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd, []setup.Recipe{recipe}, setupFlags{
@@ -109,7 +105,7 @@ func runSetup(cmd *cobra.Command, recipes []setup.Recipe, flags setupFlags) erro
 	if flags.remove {
 		return runner.Remove(recipes)
 	}
-	fmt.Fprintln(runner.Out, "Installing Pine agent instructions:")
+	fmt.Fprintln(runner.Out, "Installing Pine agent integrations:")
 	return runner.Install(recipes)
 }
 

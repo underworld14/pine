@@ -36,6 +36,6 @@ func runAgentWizard(cmd *cobra.Command, yes bool) error {
 			return err
 		}
 	}
-	fmt.Fprintln(runner.Out, "Installing Pine agent instructions:")
+	fmt.Fprintln(runner.Out, "Installing Pine agent integrations:")
 	return runner.Install(recipes)
 }

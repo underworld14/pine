@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/underworld14/pine/internal/gitx"
@@ -74,20 +73,18 @@ func (srv *Server) handleGit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, srv.gitSnapshot())
 }
 
-// handleFiles suggests tracked file paths matching q (for the "Related Files"
-// autocomplete that replaces the PRD's smart-file-detection magic).
+// handleFiles suggests tracked file and directory paths matching q (for the
+// "@" related-files autocomplete in the editor).
 func (srv *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	q := strings.ToLower(r.URL.Query().Get("q"))
+	q := r.URL.Query().Get("q")
 	ctx, cancel := context.WithTimeout(r.Context(), gitTimeout)
 	defer cancel()
-	out := []string{}
-	for _, f := range srv.git.Files(ctx) {
-		if q == "" || strings.Contains(strings.ToLower(f), q) {
-			out = append(out, f)
-			if len(out) >= fileSuggestCap {
-				break
-			}
+	items := suggestFileItems(srv.git.Files(ctx), q, fileSuggestCap)
+	files := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.Kind == "file" {
+			files = append(files, it.Path)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": out})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "files": files})
 }

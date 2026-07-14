@@ -156,8 +156,8 @@ func TestRunnerList(t *testing.T) {
 	r.List()
 	out := buf.String()
 	for _, info := range Registry() {
-		if !strings.Contains(out, info.File) || !strings.Contains(out, info.Description) {
-			t.Fatalf("expected list to mention %s:\n%s", info.File, out)
+		if !strings.Contains(out, string(info.Name)) || !strings.Contains(out, info.Label) || !strings.Contains(out, info.Description) {
+			t.Fatalf("expected list to mention %s/%s:\n%s", info.Name, info.Label, out)
 		}
 	}
 }
@@ -294,7 +294,7 @@ func TestWizardQuit(t *testing.T) {
 	}
 }
 
-func TestWizardNoToolsSelected(t *testing.T) {
+func TestWizardNoAgentsSelected(t *testing.T) {
 	var buf bytes.Buffer
 	r := &Runner{
 		Out: &buf,
@@ -304,8 +304,8 @@ func TestWizardNoToolsSelected(t *testing.T) {
 	}
 
 	_, err := r.Wizard(true)
-	if err == nil || !strings.Contains(err.Error(), "no tools selected") {
-		t.Fatalf("expected no-tools-selected error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no agents selected") {
+		t.Fatalf("expected no-agents-selected error, got %v", err)
 	}
 }
 

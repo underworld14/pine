@@ -49,43 +49,49 @@ func TestHandleFiles(t *testing.T) {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	var out struct {
-		Files []string `json:"files"`
+		Items []FileItem `json:"items"`
+		Files []string   `json:"files"`
 	}
 	if err := json.Unmarshal([]byte(body), &out); err != nil {
 		t.Fatalf("bad json: %v: %s", err, body)
 	}
 	found := false
-	for _, f := range out.Files {
-		if strings.Contains(f, "BUG-0a1b2c.md") {
+	for _, it := range out.Items {
+		if strings.Contains(it.Path, "BUG-0a1b2c.md") && it.Kind == "file" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected the tracked ticket file among files: %+v", out.Files)
+		t.Fatalf("expected the tracked ticket file among items: %+v", out.Items)
+	}
+	if len(out.Files) == 0 {
+		t.Fatalf("expected files alias populated")
 	}
 
-	// Filtered query.
+	// Filtered query — items include matching paths.
 	_, body2 := do(t, "GET", ts.URL+"/api/files?q=bug-0a1b2c", "", nil)
 	var out2 struct {
-		Files []string `json:"files"`
+		Items []FileItem `json:"items"`
+		Files []string   `json:"files"`
 	}
 	json.Unmarshal([]byte(body2), &out2)
-	if len(out2.Files) == 0 {
+	if len(out2.Items) == 0 {
 		t.Fatalf("expected a match for filtered query: %s", body2)
 	}
-	for _, f := range out2.Files {
-		if !strings.Contains(strings.ToLower(f), "bug-0a1b2c") {
-			t.Errorf("unexpected file in filtered results: %s", f)
+	for _, it := range out2.Items {
+		if !strings.Contains(strings.ToLower(it.Path), "bug-0a1b2c") {
+			t.Errorf("unexpected item in filtered results: %+v", it)
 		}
 	}
 
 	// Query matching nothing.
 	_, body3 := do(t, "GET", ts.URL+"/api/files?q=zzz-does-not-exist", "", nil)
 	var out3 struct {
-		Files []string `json:"files"`
+		Items []FileItem `json:"items"`
+		Files []string   `json:"files"`
 	}
 	json.Unmarshal([]byte(body3), &out3)
-	if len(out3.Files) != 0 {
-		t.Errorf("expected no matches: %+v", out3.Files)
+	if len(out3.Items) != 0 || len(out3.Files) != 0 {
+		t.Errorf("expected no matches: items=%+v files=%+v", out3.Items, out3.Files)
 	}
 }

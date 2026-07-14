@@ -5,6 +5,7 @@ import {
   replaceAll,
   replaceUploadPlaceholder,
   rewriteStagedUploads,
+  stripAttachmentMarkdown,
   uploadPlaceholder,
   uploadingPlaceholder
 } from './insert-at-cursor';
@@ -84,5 +85,31 @@ describe('rewriteStagedUploads', () => {
   it('strips leftovers when the upload response is shorter than staged', () => {
     const body = `x ${uploadPlaceholder('u9', 'solo.png')}`;
     expect(rewriteStagedUploads(body, ['u9'], [])).toBe('x ');
+  });
+});
+
+describe('stripAttachmentMarkdown', () => {
+  it('removes image and bare links for the attachment', () => {
+    const body = [
+      '# Notes',
+      '',
+      '![shot](../attachments/BUG-001/image-abc.webp)',
+      'see [file](../attachments/BUG-001/notes.txt)',
+      'keep ![other](../attachments/BUG-001/keep.png)',
+      ''
+    ].join('\n');
+    const next = stripAttachmentMarkdown(body, 'BUG-001', 'image-abc.webp');
+    expect(next).not.toContain('image-abc.webp');
+    expect(next).toContain('keep.png');
+    expect(next).toContain('notes.txt');
+
+    const next2 = stripAttachmentMarkdown(next, 'BUG-001', 'notes.txt');
+    expect(next2).not.toContain('notes.txt');
+    expect(next2).toContain('keep.png');
+  });
+
+  it('handles /attachments/ URLs and special chars in the name', () => {
+    const body = '![x](/attachments/FEAT-1/foo.(bar).png)\n';
+    expect(stripAttachmentMarkdown(body, 'FEAT-1', 'foo.(bar).png').trim()).toBe('');
   });
 });

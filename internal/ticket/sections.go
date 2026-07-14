@@ -62,7 +62,7 @@ var bulletRe = regexp.MustCompile(`^\s*[-*]\s+(.*\S)\s*$`)
 var mdLinkRe = regexp.MustCompile(`!?\[[^\]]*\]\(([^)]+)\)`)
 
 // RelatedFiles extracts file paths listed as bullets under a "Related Files"
-// section. Backtick-fenced paths are unwrapped.
+// section. Backtick fences and a leading @ (editor file mentions) are unwrapped.
 func RelatedFiles(body string) []string {
 	content, ok := SectionContent(body, "Related Files")
 	if !ok {
@@ -71,10 +71,17 @@ func RelatedFiles(body string) []string {
 	var out []string
 	for _, line := range strings.Split(content, "\n") {
 		if m := bulletRe.FindStringSubmatch(line); m != nil {
-			out = append(out, strings.Trim(m[1], "`"))
+			out = append(out, unwrapPathToken(m[1]))
 		}
 	}
 	return out
+}
+
+func unwrapPathToken(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "`")
+	s = strings.TrimPrefix(s, "@")
+	return strings.TrimSpace(s)
 }
 
 // AttachmentRefs extracts attachment paths referenced under an "Attachments"
