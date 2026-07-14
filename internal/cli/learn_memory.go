@@ -280,11 +280,20 @@ func listMemoryJSON(cmd *cobra.Command, ms memStore) error {
 	return writeJSON(cmd.OutOrStdout(), out)
 }
 
-func searchMemoryInto(idx *search.Index, pineDir string) {
+// searchMemoryInto indexes a store's MEMORY.md and topics into idx. The title
+// must name the store it came from: index/index.go boosts title matches 3x, so
+// calling the global store "Project memory" makes every search for "project"
+// rank a phantom hit above the real ones.
+func searchMemoryInto(idx *search.Index, ms memStore) {
+	pineDir := ms.Dir
+	title := "Project memory"
+	if ms.Global {
+		title = "Personal memory" // matches DefaultGlobalMEMORY's H1
+	}
 	if mem, err := memory.ReadMEMORY(pineDir); err == nil && strings.TrimSpace(mem) != "" {
 		idx.Upsert(search.Doc{
 			ID:    memory.FileMEMORY,
-			Title: "Project memory",
+			Title: title,
 			Body:  mem,
 			Kind:  search.KindMemory,
 		})

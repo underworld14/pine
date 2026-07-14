@@ -403,7 +403,7 @@ first with --scope, --tags (AND), and --ticket.`,
 					return err
 				}
 				defer idx.Close()
-				searchMemoryInto(idx, ms.Dir)
+				searchMemoryInto(idx, ms)
 				hits := idx.Search(args[0], search.Filter{Kind: search.KindMemory}, 20)
 				if asJSON {
 					out := make([]map[string]any, 0, len(hits))
@@ -439,7 +439,7 @@ first with --scope, --tags (AND), and --ticket.`,
 			for _, l := range corpus {
 				idx.Upsert(search.DocFromLearning(l))
 			}
-			searchMemoryInto(idx, s.Root())
+			searchMemoryInto(idx, projectStore(s))
 			hits := idx.Search(args[0], search.Filter{
 				Scope: filter.Scope,
 				Tags:  filter.Tags,

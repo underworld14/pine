@@ -50,13 +50,14 @@ func GlobalDir() (string, error) {
 // no disk, no home lookup — so it is exhaustively testable.
 func resolveGlobalDir(pineHome, userHome string) (string, error) {
 	if v := strings.TrimSpace(pineHome); v != "" {
-		// Abs, not Clean: a relative PINE_HOME would otherwise resolve to a
-		// different store per working directory, which is not "machine-wide".
-		abs, err := filepath.Abs(v)
-		if err != nil {
-			return "", fmt.Errorf("invalid %s %q: %w", EnvHome, v, err)
+		// Reject rather than Abs: filepath.Abs resolves against the working
+		// directory, so a relative PINE_HOME would silently give a different
+		// store per directory — the opposite of "machine-wide" — and scatter
+		// stray dirs inside whatever repo the user happens to be standing in.
+		if !filepath.IsAbs(v) {
+			return "", fmt.Errorf("%s must be an absolute path, got %q", EnvHome, v)
 		}
-		return abs, nil
+		return filepath.Clean(v), nil
 	}
 	if strings.TrimSpace(userHome) == "" {
 		return "", fmt.Errorf("cannot resolve a home directory for global memory; set %s", EnvHome)

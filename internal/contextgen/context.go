@@ -180,9 +180,8 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	for _, c := range git.Changes {
 		cwdHints = append(cwdHints, c.Path)
 	}
-	if block := FormatMemoryBlock(s, cwdHints, nil, 3); block != "" {
-		b.WriteString(block)
-	}
+	memBlock := FormatMemoryBlock(s, cwdHints, nil, 3)
+	b.WriteString(memBlock)
 	learnings, more := SelectLearnings(s, LearningSelectOpts{CwdHints: cwdHints, Limit: 10})
 	if block := FormatLearningsBlock(learnings, more); block != "" {
 		b.WriteString(block)
@@ -198,9 +197,15 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
 	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (ticket one-shots: `--scope ticket`).\n")
 	if cfg.Context.GlobalMemory {
-		// Gated on the same config as the block itself: opted out, there is no
-		// "Your Preferences" section above and this line would be a lie.
-		b.WriteString("- Preferences that hold in every repo go in your global store: `pine learn -g \"...\"` (shown above under Your Preferences).\n")
+		// Two reasons the section can be absent — opted out, and (far more
+		// commonly) no global store yet — so gate on what was actually
+		// rendered, not on the config alone. Anything else tells the agent to
+		// look above for a section that is not there.
+		if strings.Contains(memBlock, globalHeading) {
+			b.WriteString("- Preferences that hold in every repo go in your global store: `pine learn -g \"...\"` (shown above under Your Preferences).\n")
+		} else {
+			b.WriteString("- Preferences that hold in every repo go in your global store: `pine learn -g \"...\"` (nothing there yet).\n")
+		}
 	}
 
 	return b.String()

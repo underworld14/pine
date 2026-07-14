@@ -22,19 +22,18 @@ func TestMain(m *testing.M) {
 }
 
 func TestResolveGlobalDir(t *testing.T) {
-	abs, err := filepath.Abs("rel-pine")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cases := []struct {
 		pineHome, userHome, want string
 		wantErr                  bool
 	}{
 		{"/tmp/explicit", "/home/u", "/tmp/explicit", false},
+		{"/tmp/explicit/", "/home/u", "/tmp/explicit", false},          // trailing sep cleaned
+		{"/tmp/a/../explicit", "/home/u", "/tmp/explicit", false},      // cleaned
 		{"", "/home/u", filepath.Join("/home/u", DirGlobal), false},
 		{"   ", "/home/u", filepath.Join("/home/u", DirGlobal), false}, // blank ≠ set
-		{"rel-pine", "/home/u", abs, false},                            // relative → absolute
-		{"", "", "", true},                                             // no home, no PINE_HOME
+		{"rel-pine", "/home/u", "", true},                              // relative → rejected, not cwd-resolved
+		{"./rel", "/home/u", "", true},
+		{"", "", "", true}, // no home, no PINE_HOME
 		{"", "   ", "", true},
 	}
 	for _, c := range cases {
@@ -210,5 +209,17 @@ func TestEnsureGlobalLayoutErrorsOnUnwritableHome(t *testing.T) {
 	t.Setenv(EnvHome, f)
 	if _, err := EnsureGlobalLayout(); err == nil {
 		t.Fatal("expected an error when the global home is not a directory")
+	}
+}
+
+func TestResolveGlobalDirRejectsRelativePineHome(t *testing.T) {
+	// A relative PINE_HOME would resolve against the cwd, giving a different
+	// "machine-wide" store per directory and scattering stray dirs into repos.
+	_, err := resolveGlobalDir("relhome", "/home/u")
+	if err == nil {
+		t.Fatal("a relative PINE_HOME must be rejected, not cwd-resolved")
+	}
+	if !strings.Contains(err.Error(), "absolute") || !strings.Contains(err.Error(), EnvHome) {
+		t.Errorf("error should name %s and say absolute, got: %v", EnvHome, err)
 	}
 }

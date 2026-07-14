@@ -68,7 +68,8 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
-// findPineDir walks up from start looking for a .pine directory.
+// findPineDir walks up from start looking for a project .pine directory,
+// skipping the machine-wide memory store (see isGlobalOnlyStore).
 func findPineDir(start string) (string, error) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
@@ -76,7 +77,7 @@ func findPineDir(start string) (string, error) {
 	}
 	for {
 		p := filepath.Join(dir, ".pine")
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() && !isGlobalOnlyStore(p) {
 			return p, nil
 		}
 		parent := filepath.Dir(dir)
@@ -85,6 +86,23 @@ func findPineDir(start string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// isGlobalOnlyStore reports whether p is the machine-wide memory store and
+// nothing more.
+//
+// `pine learn -g` creates ~/.pine, so from any non-repo directory under $HOME
+// the upward walk would otherwise find it and treat a private memory store as
+// this project's — every command then failing on its absent config.json. It is
+// only skipped when it holds no config.json: a ~/.pine that someone deliberately
+// ran `pine init` in is a real project store and must still resolve.
+func isGlobalOnlyStore(p string) bool {
+	global, err := memory.GlobalDir()
+	if err != nil || p != global {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(p, "config.json"))
+	return os.IsNotExist(err)
 }
 
 // openStore locates and opens the store for the current --dir.

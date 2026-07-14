@@ -378,3 +378,45 @@ func TestLearnListGlobalJSONEmptyStore(t *testing.T) {
 		t.Errorf("want an empty topics array, got %v", got["topics"])
 	}
 }
+
+func TestFindPineDirSkipsGlobalOnlyStore(t *testing.T) {
+	// `pine learn -g` creates ~/.pine. From a non-repo dir under $HOME the
+	// upward walk must not mistake that private store for this project's, or
+	// every command fails on its absent config.json instead of saying there is
+	// no project here.
+	home := t.TempDir()
+	t.Setenv(memory.EnvHome, filepath.Join(home, ".pine"))
+	if _, err := run(t, t.TempDir(), "learn", "-g", "prefer tabs"); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(home, "scratch")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, scratch, "learn", "x") // the -g they forgot
+	if err == nil {
+		t.Fatal("expected an error: there is no project store here")
+	}
+	if !strings.Contains(err.Error(), "no .pine directory found here or above") {
+		t.Errorf("want the actionable no-project error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "config.json") {
+		t.Errorf("must not surface the global store as a broken project: %v", err)
+	}
+}
+
+func TestFindPineDirKeepsGlobalPathWhenItIsARealProject(t *testing.T) {
+	// A ~/.pine that someone deliberately ran `pine init` in has a config.json
+	// and is a real project store — the skip must not break it.
+	home := t.TempDir()
+	t.Setenv(memory.EnvHome, filepath.Join(home, ".pine"))
+	if _, err := run(t, home, "init", "--skip-agents"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".pine", "config.json")); err != nil {
+		t.Fatalf("precondition: init should have written config.json: %v", err)
+	}
+	if _, err := run(t, home, "learn", "a project rule", "--to", "MEMORY.md"); err != nil {
+		t.Errorf("a real project at the global path must still resolve: %v", err)
+	}
+}

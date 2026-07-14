@@ -105,3 +105,21 @@ func TestCheckGlobalMemoryUnreadableWarns(t *testing.T) {
 		t.Errorf("message should say why:\n%s", r.Findings[0].Msg)
 	}
 }
+
+func TestRunRegistersGlobalMemoryCheck(t *testing.T) {
+	// The five tests above call checkGlobalMemory directly, so deleting its
+	// registration in Run() left every test green while pine doctor silently
+	// lost the check. This guards the wiring itself.
+	seedGlobalMEMORY(t, strings.Repeat("- a long personal preference line\n", 200))
+	s, _ := scaffold(t)
+	r := Run(s)
+	found := false
+	for _, f := range r.Findings {
+		if strings.Contains(f.Msg, "pine context injects only the first 2048") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Run() must register checkGlobalMemory; findings were: %v", r.Findings)
+	}
+}

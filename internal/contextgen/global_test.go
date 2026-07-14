@@ -169,11 +169,17 @@ func TestFormatMemoryBlockCapsGlobalAt2048(t *testing.T) {
 	if g < 0 || p < 0 {
 		t.Fatalf("missing a section:\n%s", md)
 	}
-	// Body is capped at ContextGlobalCap; the rest is the fixed header, the
-	// precedence line and the truncation notice (~220B). Untruncated this
-	// body would be ~13 KB, so this bound still proves the cap bites.
-	if n := p - g; n > memory.ContextGlobalCap+320 {
-		t.Errorf("global block %d bytes, want <= %d", n, memory.ContextGlobalCap+320)
+	// Pin the documented number, not the constant: bounding by ContextGlobalCap
+	// would keep this test green if someone changed the cap to 3500.
+	if memory.ContextGlobalCap != 2048 {
+		t.Fatalf("this test pins the documented 2048-byte cap; constant is %d", memory.ContextGlobalCap)
+	}
+	// Overhead = fixed heading + precedence line + truncation notice, and the
+	// notice embeds the store label — a t.TempDir() path whose length varies
+	// with $TMPDIR, so it must be budgeted explicitly rather than absorbed.
+	maxOverhead := 200 + len(memory.GlobalLabel(dir))
+	if n := p - g; n > 2048+maxOverhead {
+		t.Errorf("global block %d bytes, want <= %d (2048 body + %d overhead)", n, 2048+maxOverhead, maxOverhead)
 	}
 	if !strings.Contains(md, "… truncated") {
 		t.Errorf("want a truncation notice:\n%s", md)
@@ -250,5 +256,25 @@ func TestContextIncludesGlobalPreferences(t *testing.T) {
 	}
 	if !(glob < conv) {
 		t.Errorf("global block should precede Conventions")
+	}
+}
+
+func TestContextGlobalConventionLineTellsTheTruthWhenStoreAbsent(t *testing.T) {
+	// The untested quadrant: global memory ENABLED but no store yet — the state
+	// of every install until the first `pine learn -g`. The pointer line must
+	// not claim a section that formatGlobalBlock did not render.
+	t.Setenv(memory.EnvHome, filepath.Join(t.TempDir(), "absent"))
+	s := scaffold(t)
+	md := Context(s, fakeGit(), time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
+
+	if strings.Contains(md, globalHeading) {
+		t.Fatalf("precondition: no store, so no section should render:\n%s", md)
+	}
+	if strings.Contains(md, "shown above under Your Preferences") {
+		t.Errorf("context points at a section that was never rendered:\n%s", md)
+	}
+	// The actionable half is still worth printing.
+	if !strings.Contains(md, "pine learn -g") {
+		t.Errorf("the -g pointer is still useful when the store is empty:\n%s", md)
 	}
 }

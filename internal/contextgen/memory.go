@@ -10,6 +10,11 @@ import (
 	"github.com/underworld14/pine/internal/store"
 )
 
+// globalHeading titles the machine-wide block. Context() greps the rendered
+// block for it to decide whether its "shown above" pointer would be true, so
+// the heading and that check must never drift apart.
+const globalHeading = "## Your Preferences (global)"
+
 // FormatMemoryBlock renders MEMORY.md + ranked topic excerpts for pine context.
 func FormatMemoryBlock(s *store.Store, cwdHints []string, ticketLabels []string, limitTopics int) string {
 	if s == nil {
@@ -81,7 +86,7 @@ func formatGlobalBlock() string {
 
 	label := memory.GlobalLabel(dir)
 	var b strings.Builder
-	b.WriteString("## Your Preferences (global)\n")
+	b.WriteString(globalHeading + "\n")
 	b.WriteString("If anything here conflicts with Project Memory, Project Memory wins.\n\n")
 	if body != "" {
 		b.WriteString(memory.TruncateForContext(body, memory.ContextGlobalCap, label+"/"+memory.FileMEMORY))
