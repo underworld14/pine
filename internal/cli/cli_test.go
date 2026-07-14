@@ -325,6 +325,9 @@ func TestSetupYesInstallsAll(t *testing.T) {
 		if !strings.Contains(string(data), "pine learn") || !strings.Contains(string(data), "load the pine skill") {
 			t.Fatalf("%s missing summary / skill pointer:\n%s", name, data)
 		}
+		if !strings.Contains(string(data), "pine learn -g") {
+			t.Fatalf("%s missing the global memory rule:\n%s", name, data)
+		}
 	}
 	for _, skill := range []string{
 		".agents/skills/pine/SKILL.md",
@@ -336,6 +339,9 @@ func TestSetupYesInstallsAll(t *testing.T) {
 		}
 		if !strings.Contains(string(data), "Persistent learnings") || !strings.Contains(string(data), "Essential commands") {
 			t.Fatalf("%s should hold the full workflow:\n%s", skill, data)
+		}
+		if !strings.Contains(string(data), "Memory discipline") {
+			t.Fatalf("%s should hold the memory discipline rules:\n%s", skill, data)
 		}
 	}
 	for _, hook := range []string{

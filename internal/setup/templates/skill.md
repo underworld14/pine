@@ -57,11 +57,15 @@ pine learn "<insight>" --to memory/analytics.md # domain topic (append)
 pine learn "<insight>" --new-topic analytics    # create topic + first bullet
 pine learn "<insight>" --scope ticket --ticket ID   # rare ticket-scoped LRN-*
 pine learn list / search / show MEMORY.md
+pine learn -g "<insight>"                       # personal: applies in every repo (~/.pine)
+pine learn -g "<insight>" --new-topic pnpm      # personal topic
+pine learn list -g / search -g / show -g MEMORY.md
 ```
 
 **Where to put insights**
 
-- `MEMORY.md` — user preferences, project-wide rules, “never do X”
+- `~/.pine/MEMORY.md` — personal, cross-repo preferences (`pine learn -g`; works in any repo)
+- `MEMORY.md` — project-wide rules for *this* repo, “never do X here”
 - `memory/<topic>.md` — domain gotchas (append to an existing topic when relevant)
 - `LRN-*` — only ticket-scoped / ephemeral notes (`--scope ticket`)
 
@@ -81,4 +85,31 @@ Guidance:
 - Pass `--source <claude-code|codex|gemini|manual>` matching whichever agent you are.
 - If the insight text is exactly "list", "search", "show", or "suggest", pass it via `--text`.
 
-Relevant MEMORY / topics / learnings are included automatically in `pine context`.
+## Memory discipline
+
+Pine is the memory that survives you switching harness (Claude Code, Codex, Gemini CLI,
+Cursor). Keep it small, current, and true.
+
+**Checkpoint** — after finishing a task (closing a ticket, fixing a bug), ask: “what did I
+learn that outlives this session?” If something, save it before moving on.
+
+**Check before you write** — search first (`pine learn search "<term>"`, add `-g` for personal
+memory). Update the existing line instead of appending a near-duplicate; delete lines that
+turned out wrong.
+
+**One fact per bullet** — concrete and self-contained; readable a month later with no session
+context. No ticket IDs, no dates.
+
+**Where it goes**
+
+- About you, or true in any repo (tools, style, habits) → `pine learn -g "…"` → `~/.pine/`
+- About this repo → `pine learn "…"` → `.pine/MEMORY.md` or `.pine/memory/<topic>.md`
+- Ephemeral note about one ticket → `pine learn "…" --scope ticket --ticket <ID>`
+
+**Do not save** what the repo already records: code, git history, the instruction files,
+routine ticket completion, or anything already in the docs.
+
+If global and project memory disagree, the project wins.
+
+Relevant MEMORY / topics / learnings — plus your global preferences from `~/.pine/` — are
+included automatically in `pine context`.

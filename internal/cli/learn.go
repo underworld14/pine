@@ -20,12 +20,38 @@ var confirmDeleteFn = func(summary string, in io.Reader, out io.Writer) (bool, e
 	return tui.ConfirmDeleteIO(summary, in, out)
 }
 
+// globalConflict reports the repo-local flag that cannot be combined with
+// --global. The machine-wide store holds MEMORY.md and topics only: LRN files,
+// tickets and components are all project-scoped by construction.
+//
+// --scope global is the happy path, not a conflict: it has always meant
+// "repo-wide" and is the default, so `pine learn -g` must not trip on it.
+func globalConflict(scopeNorm, ticketID, sup, component string, legacyLRN bool) error {
+	switch {
+	case scopeNorm == learning.ScopeTicket:
+		return fmt.Errorf("--global cannot be combined with --scope ticket (ticket learnings are project-scoped LRN files)")
+	case scopeNorm == learning.ScopeComponent:
+		// Note: --scope component routes to MEMORY/topics, not to an LRN file.
+		// It is rejected because components name paths inside one repository.
+		return fmt.Errorf("--global cannot be combined with --scope component (components are project-scoped)")
+	case strings.TrimSpace(component) != "":
+		return fmt.Errorf("--global cannot be combined with --component (components are project-scoped)")
+	case legacyLRN:
+		return fmt.Errorf("--global cannot be combined with --legacy-lrn (LRN files are project-scoped)")
+	case sup != "":
+		return fmt.Errorf("--global cannot be combined with --supersedes (LRN files are project-scoped)")
+	case ticketID != "":
+		return fmt.Errorf("--global cannot be combined with --ticket (tickets are project-scoped)")
+	}
+	return nil
+}
+
 // newLearnCmd is registered from root.go.
 func newLearnCmd() *cobra.Command {
 	var (
 		scope, ticket, component, source, tagsCSV, supersedes, citesCSV, textFlag string
 		toPath, newTopic                                                          string
-		asJSON, legacyLRN                                                         bool
+		asJSON, legacyLRN, global                                                 bool
 	)
 	cmd := &cobra.Command{
 		Use:   "learn [text]",
@@ -42,6 +68,13 @@ Ticket-scoped one-shots still create .pine/learnings/LRN-*.md:
 Force a destination with --to MEMORY.md | --to memory/analytics.md | --new-topic slug.
 Pass --legacy-lrn to create a global LRN-* file (escape hatch).
 
+Preferences that hold in every repository go in your machine-wide store:
+  pine learn -g "I use pnpm, never npm"     # → ~/.pine/MEMORY.md
+  pine learn -g "..." --new-topic pnpm      # → ~/.pine/memory/pnpm.md
+-g works outside a pine repo, and applies to list / search / show too.
+Unlike the project store, -g appends to MEMORY.md directly instead of
+suggesting a topic — pass --new-topic or --to to file it elsewhere.
+
 Subcommands: list, search, show, suggest, supersede, rm.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,10 +86,6 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 				return fmt.Errorf("learning text is required (or use: pine learn list | search | show | suggest)")
 			case text == "":
 				text = args[0]
-			}
-			s, err := openStore()
-			if err != nil {
-				return err
 			}
 			tags := splitCSV(tagsCSV)
 			cites := splitCSV(citesCSV)
@@ -72,6 +101,24 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 			scopeNorm := strings.ToLower(strings.TrimSpace(scope))
 			if scopeNorm == "" {
 				scopeNorm = learning.ScopeGlobal
+			}
+
+			// The machine-wide store is resolved before openStore, and instead
+			// of it: -g must work outside a pine repo.
+			if global {
+				if err := globalConflict(scopeNorm, ticketID, sup, component, legacyLRN); err != nil {
+					return err
+				}
+				ms, err := globalMemStore()
+				if err != nil {
+					return err
+				}
+				return captureMemoryInsight(cmd, ms, text, cites, "", toPath, newTopic, asJSON)
+			}
+
+			s, err := openStore()
+			if err != nil {
+				return err
 			}
 
 			// Ticket-scoped (or explicit legacy LRN) → classic learning file.
@@ -108,11 +155,14 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 			}
 
 			// Default / component → MEMORY.md or memory/<topic>.md
-			return captureMemoryInsight(cmd, s, text, cites, component, toPath, newTopic, asJSON)
+			return captureMemoryInsight(cmd, projectStore(s), text, cites, component, toPath, newTopic, asJSON)
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global (default → MEMORY/topics) | ticket | component")
+	// "global (repo-wide)" defuses the collision with -g/--global printed a few
+	// lines below: --scope global has always meant project-wide, not machine-wide.
+	f.StringVar(&scope, "scope", learning.ScopeGlobal, "scope: global (repo-wide, default → MEMORY/topics) | ticket | component")
+	f.BoolVarP(&global, "global", "g", false, "read/write your machine-wide memory in ~/.pine (works outside a repo; not the same as --scope global)")
 	f.StringVar(&tagsCSV, "tags", "", "comma-separated tags (LRN only)")
 	f.StringVar(&ticket, "ticket", "", "ticket ID (required when --scope ticket)")
 	f.StringVar(&component, "component", "", "component path hint for topic matching")
@@ -264,6 +314,7 @@ this leaves no history. Prompts for confirmation unless --yes is given.`,
 
 func newLearnListCmd() *cobra.Command {
 	var (
+		global bool
 		lf     *learningFilterFlags
 		asJSON bool
 	)
@@ -277,12 +328,24 @@ missing --cites path are hidden; pass --include-superseded / --include-stale
 to audit them. Narrow the list with --scope, --tags (AND), and --ticket.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Must return before s.ListLearnings below: -g has no store, and
+			// LRN files are project-only anyway.
+			if global {
+				ms, err := readGlobalMemStore()
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					return listMemoryJSON(cmd, ms)
+				}
+				return listMemoryEntries(cmd, ms)
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
 			if !asJSON {
-				if err := listMemoryEntries(cmd, s); err != nil {
+				if err := listMemoryEntries(cmd, projectStore(s)); err != nil {
 					return err
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "LRN learnings:")
@@ -308,13 +371,14 @@ to audit them. Narrow the list with --scope, --tags (AND), and --ticket.`,
 	}
 	lf = registerLearningFilterFlags(cmd)
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	cmd.Flags().BoolVarP(&global, "global", "g", false, "list your machine-wide memory in ~/.pine instead (works outside a repo)")
 	return cmd
 }
 
 func newLearnSearchCmd() *cobra.Command {
 	var (
-		lf     *learningFilterFlags
-		asJSON bool
+		lf             *learningFilterFlags
+		asJSON, global bool
 	)
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -327,6 +391,40 @@ missing --cites path are excluded from the search corpus; pass
 first with --scope, --tags (AND), and --ticket.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Must return before s.ListLearnings / s.AllLearnings below: -g has
+			// no store, and the LRN filter flags are meaningless against it.
+			if global {
+				ms, err := readGlobalMemStore()
+				if err != nil {
+					return err
+				}
+				idx, err := search.New()
+				if err != nil {
+					return err
+				}
+				defer idx.Close()
+				searchMemoryInto(idx, ms.Dir)
+				hits := idx.Search(args[0], search.Filter{Kind: search.KindMemory}, 20)
+				if asJSON {
+					out := make([]map[string]any, 0, len(hits))
+					for _, h := range hits {
+						out = append(out, map[string]any{
+							"kind": "memory", "store": "global", "path": h.ID, "score": h.Score,
+						})
+					}
+					return writeJSON(cmd.OutOrStdout(), out)
+				}
+				if len(hits) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "No global memory matched.")
+					return nil
+				}
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "PATH\tSCORE")
+				for _, h := range hits {
+					fmt.Fprintf(w, "%s\t%.2f\n", h.ID, h.Score)
+				}
+				return w.Flush()
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -404,11 +502,12 @@ first with --scope, --tags (AND), and --ticket.`,
 	}
 	lf = registerLearningFilterFlags(cmd)
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	cmd.Flags().BoolVarP(&global, "global", "g", false, "search your machine-wide memory in ~/.pine instead (works outside a repo)")
 	return cmd
 }
 
 func newLearnShowCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, global bool
 	cmd := &cobra.Command{
 		Use:   "show <id-or-path>",
 		Short: "Show one learning, MEMORY.md, or a memory topic file",
@@ -416,14 +515,28 @@ func newLearnShowCmd() *cobra.Command {
 
   pine learn show LRN-001
   pine learn show MEMORY.md
-  pine learn show memory/analytics.md`,
+  pine learn show memory/analytics.md
+  pine learn show -g MEMORY.md          # your machine-wide store`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Must return before openStore: -g works outside a repo, and there
+			// are no LRN files in the machine-wide store to fall through to.
+			if global {
+				ms, err := readGlobalMemStore()
+				if err != nil {
+					return err
+				}
+				handled, err := tryShowMemory(cmd, ms, args[0], asJSON)
+				if !handled && err == nil {
+					return fmt.Errorf("no global memory entry %q (use MEMORY.md or memory/<topic>.md)", args[0])
+				}
+				return err
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			if handled, err := tryShowMemory(cmd, s, args[0], asJSON); handled {
+			if handled, err := tryShowMemory(cmd, projectStore(s), args[0], asJSON); handled {
 				return err
 			}
 			id := normalizeID(args[0])
@@ -481,6 +594,7 @@ func newLearnShowCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	cmd.Flags().BoolVarP(&global, "global", "g", false, "show from your machine-wide memory in ~/.pine (works outside a repo)")
 	return cmd
 }
 

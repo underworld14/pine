@@ -14,8 +14,17 @@ const (
 	cursorHookRelScript = ".cursor/hooks/pine-learn-reminder.sh"
 )
 
+// learnReminderText is the single source of the Stop/sessionStart reminder for
+// every agent.
+//
+// It must stay shell-safe: the Claude variant embeds it raw inside echo "…"
+// (see learnReminderCommand), so a double quote, backtick, dollar sign or
+// backslash here would emit a broken command. TestLearnReminderTextIsShellSafe
+// enforces this.
 func learnReminderText() string {
-	return "Pine reminder: only if you learned something durable, run 'pine learn' (MEMORY.md / memory topics — not a new LRN per ticket). " + hookSentinel
+	return "Pine reminder: only if you learned something durable, run 'pine learn' (this repo) " +
+		"or 'pine learn -g' (applies to every repo) — MEMORY.md / memory topics, " +
+		"not a new LRN per ticket. " + hookSentinel
 }
 
 func codexHookCommand() string {

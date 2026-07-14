@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/store"
 )
 
@@ -93,6 +94,27 @@ func openStore() (*store.Store, error) {
 		return nil, err
 	}
 	return store.Open(pineDir)
+}
+
+// globalMemStore resolves the machine-wide memory store for a write, creating
+// it with the personal seed on first use. Unlike openStore it needs no .pine
+// and no git repo — `pine learn -g` must work from anywhere.
+func globalMemStore() (memStore, error) {
+	dir, err := memory.EnsureGlobalLayout()
+	if err != nil {
+		return memStore{}, err
+	}
+	return memStore{Dir: dir, Label: memory.GlobalLabel(dir), Global: true}, nil
+}
+
+// readGlobalMemStore resolves the machine-wide memory store for a read. It
+// creates nothing: a missing global store stays missing.
+func readGlobalMemStore() (memStore, error) {
+	dir, err := memory.GlobalDir()
+	if err != nil {
+		return memStore{}, err
+	}
+	return memStore{Dir: dir, Label: memory.GlobalLabel(dir), Global: true}, nil
 }
 
 // repoRoot walks up from start to find a directory containing .git (a directory

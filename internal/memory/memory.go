@@ -71,8 +71,17 @@ func TopicPath(pineDir, slug string) string {
 	return filepath.Join(TopicsDir(pineDir), Slugify(slug)+".md")
 }
 
-// EnsureLayout creates memory/ and seeds MEMORY.md if missing.
-func EnsureLayout(pineDir string) error {
+// EnsureLayout creates memory/ and seeds the project MEMORY.md if missing.
+func EnsureLayout(pineDir string) error { return ensureLayout(pineDir, DefaultMEMORY) }
+
+// ensureLayout creates memory/ under pineDir and writes seed to MEMORY.md only
+// when it is absent.
+//
+// Ordering invariant for the machine-wide store: AppendMEMORY and AppendTopic
+// call EnsureLayout (the project seed) internally, so every global write must
+// reach EnsureGlobalLayout first. The inner call then finds MEMORY.md present
+// and no-ops instead of re-seeding ~/.pine with project-flavoured text.
+func ensureLayout(pineDir, seed string) error {
 	if err := os.MkdirAll(TopicsDir(pineDir), 0o755); err != nil {
 		return err
 	}
@@ -82,7 +91,7 @@ func EnsureLayout(pineDir string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(path, []byte(DefaultMEMORY), 0o644)
+	return os.WriteFile(path, []byte(seed), 0o644)
 }
 
 // Slugify normalizes a topic name to a filename-safe slug.
@@ -345,8 +354,11 @@ func ResolveTo(to string) (kind, value string, err error) {
 	}
 }
 
-// TruncateForContext returns MEMORY body capped for pine context.
-func TruncateForContext(body string, capBytes int) string {
+// TruncateForContext returns a MEMORY body capped for pine context. srcLabel
+// names the file to read in full and must match the store the body came from
+// (".pine/MEMORY.md", "~/.pine/MEMORY.md", …) — a caller that gets this wrong
+// points the reader at someone else's memory.
+func TruncateForContext(body string, capBytes int, srcLabel string) string {
 	if capBytes <= 0 {
 		capBytes = ContextMEMORYCap
 	}
@@ -357,5 +369,5 @@ func TruncateForContext(body string, capBytes int) string {
 	if i := strings.LastIndex(cut, "\n"); i > capBytes/2 {
 		cut = cut[:i]
 	}
-	return cut + "\n\n… truncated — see `.pine/MEMORY.md`\n"
+	return cut + "\n\n… truncated — see `" + srcLabel + "`\n"
 }

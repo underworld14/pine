@@ -8,6 +8,7 @@ This repository uses [Pine](https://github.com/underworld14/pine) — git-native
 - Start with `pine context`; pick work with `pine ready`.
 - Write progress back to `.pine/tickets/<ID>.md` (or `pine update` / `pine close`). Move tickets by editing `status`{{BOARD_COLUMNS_LINE}}
 - Capture durable insights with `pine learn "…"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (not a new LRN file per ticket). Use `--scope ticket` only for ephemeral ticket notes.
+- Preferences that apply in **every** repo (your tools, style, habits) belong in your machine-wide memory: `pine learn -g "…"` → `~/.pine/`. Project memory wins on conflict.
 
 ### Full workflow
 

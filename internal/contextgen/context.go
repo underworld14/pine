@@ -197,6 +197,11 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
 	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (ticket one-shots: `--scope ticket`).\n")
+	if cfg.Context.GlobalMemory {
+		// Gated on the same config as the block itself: opted out, there is no
+		// "Your Preferences" section above and this line would be a lie.
+		b.WriteString("- Preferences that hold in every repo go in your global store: `pine learn -g \"...\"` (shown above under Your Preferences).\n")
+	}
 
 	return b.String()
 }

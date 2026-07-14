@@ -12,7 +12,7 @@ func TestWriteMemoryDestUnknownKind(t *testing.T) {
 	cmd := &cobra.Command{}
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	err := writeMemoryDest(cmd, t.TempDir(), "bogus", "x", memory.AppendOpts{Text: "hi"}, false)
+	err := writeMemoryDest(cmd, memStore{Dir: t.TempDir(), Label: ".pine"}, "bogus", "x", memory.AppendOpts{Text: "hi"}, false)
 	if err == nil {
 		t.Fatal("expected unknown kind")
 	}

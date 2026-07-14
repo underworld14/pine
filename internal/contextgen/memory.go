@@ -19,10 +19,15 @@ func FormatMemoryBlock(s *store.Store, cwdHints []string, ticketLabels []string,
 	_ = memory.EnsureLayout(pineDir)
 
 	var b strings.Builder
+	// Global first, project second: the project is nearer the work and reads
+	// last, and the fixed notice below says it wins on conflict.
+	if s.Config().Context.GlobalMemory {
+		b.WriteString(formatGlobalBlock())
+	}
 	mem, err := memory.ReadMEMORY(pineDir)
 	if err == nil && strings.TrimSpace(mem) != "" {
 		b.WriteString("## Project Memory\n")
-		b.WriteString(memory.TruncateForContext(strings.TrimSpace(mem), memory.ContextMEMORYCap))
+		b.WriteString(memory.TruncateForContext(strings.TrimSpace(mem), memory.ContextMEMORYCap, ".pine/"+memory.FileMEMORY))
 		if !strings.HasSuffix(b.String(), "\n") {
 			b.WriteByte('\n')
 		}
@@ -51,6 +56,50 @@ func FormatMemoryBlock(s *store.Store, cwdHints []string, ticketLabels []string,
 			excerpt = "…\n" + strings.Join(lines, "\n")
 		}
 		fmt.Fprintf(&b, "### %s (`%s`)\n%s\n\n", t.Title, t.RelPath, excerpt)
+	}
+	return b.String()
+}
+
+// formatGlobalBlock renders the machine-wide store at ~/.pine.
+//
+// It creates nothing and never returns an error: pine context must not break —
+// nor conjure a global store — because of a store the user may never have
+// opted into. A missing store simply yields "".
+func formatGlobalBlock() string {
+	dir, err := memory.GlobalDir()
+	if err != nil {
+		return ""
+	}
+	body := ""
+	if mem, err := memory.ReadMEMORY(dir); err == nil {
+		body = strings.TrimSpace(mem)
+	}
+	topics, _ := memory.ListTopics(dir)
+	if body == "" && len(topics) == 0 {
+		return ""
+	}
+
+	label := memory.GlobalLabel(dir)
+	var b strings.Builder
+	b.WriteString("## Your Preferences (global)\n")
+	b.WriteString("If anything here conflicts with Project Memory, Project Memory wins.\n\n")
+	if body != "" {
+		b.WriteString(memory.TruncateForContext(body, memory.ContextGlobalCap, label+"/"+memory.FileMEMORY))
+		if !strings.HasSuffix(b.String(), "\n") {
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
+	if len(topics) > 0 {
+		// Names only — never ranked, never inlined. Global topics therefore
+		// never enter rankTopics' byPath map, where they would collide with
+		// project topics: RelPath is "memory/<slug>.md" in both stores.
+		names := make([]string, 0, len(topics))
+		for _, t := range topics {
+			names = append(names, t.Slug)
+		}
+		fmt.Fprintf(&b, "Global topics: %s — read %s/%s/<slug>.md if relevant\n\n",
+			strings.Join(names, ", "), label, memory.DirTopics)
 	}
 	return b.String()
 }

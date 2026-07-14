@@ -120,9 +120,10 @@ pine export --format md        # all tickets as markdown (or --format json)
 
 `pine context` includes a **Conventions** block that teaches the agent how to
 write back to `.pine/` (edit `status` to move a ticket, use `deps`/`parent`, run
-`pine ready`/`pine close`). It also surfaces **Project Memory** (`.pine/MEMORY.md`),
-ranked **memory topics** under `.pine/memory/`, and tip-resolved **Relevant Learnings**
-(`LRN-*`, usually ticket-scoped).
+`pine ready`/`pine close`). It also surfaces **Your Preferences (global)**
+(`~/.pine/MEMORY.md`, see [Global memory](#global-memory)), **Project Memory**
+(`.pine/MEMORY.md`), ranked **memory topics** under `.pine/memory/`, and
+tip-resolved **Relevant Learnings** (`LRN-*`, usually ticket-scoped).
 
 ```sh
 pine learn suggest "prefer query builder" --cites internal/store/query.go
@@ -144,6 +145,62 @@ Durable insights go into **MEMORY.md** (prefs / project-wide rules) or
 learning for routine ticket completion. Existing global `LRN-*` files still
 work; `--legacy-lrn` creates one deliberately. Citation-stale LRNs stay hidden
 from list/search/context by default (`--include-stale` to audit).
+
+### Global memory
+
+Everything above is scoped to one repository. Preferences that follow *you* —
+your tools, your style, your habits — belong in the machine-wide store at
+`~/.pine/`, so they survive switching repo **and** switching agent:
+
+```sh
+pine learn -g "I use pnpm, never npm"           # → ~/.pine/MEMORY.md
+pine learn -g "Always squash before merging" --new-topic git-habits
+pine learn list -g                              # inspect it
+pine learn search -g pnpm
+pine learn show -g MEMORY.md
+```
+
+`-g` works **outside** a pine repo — no `.pine`, no git required — because a
+personal preference isn't about any one project. It is the only thing that ever
+creates `~/.pine`; every read (`pine context`, `list -g`, `doctor`) leaves a
+missing store missing.
+
+| | Project memory | Global memory |
+|---|---|---|
+| Path | `.pine/MEMORY.md`, `.pine/memory/<topic>.md` | `~/.pine/MEMORY.md`, `~/.pine/memory/<topic>.md` |
+| Command | `pine learn "…"` | `pine learn -g "…"` |
+| Scope | this repository | you, everywhere |
+| Committed | yes, with your code | no — it's yours |
+
+**Precedence.** `pine context` renders global preferences *above* Project
+Memory, with a fixed line stating the project wins on conflict. Nothing is
+merged mechanically: the agent reads both and the nearer, more specific rule
+takes priority.
+
+**MEMORY.md vs topics.** `-g` appends to `~/.pine/MEMORY.md` directly rather
+than suggesting a topic — unlike the project store, which ranks destinations.
+That is deliberate: only global `MEMORY.md` is injected into context (capped at
+2 KB), while global topics are listed *by name* for the agent to read on demand.
+A fact auto-filed into a topic would be a fact the agent stops seeing. Use
+`--new-topic` / `--to` when you want that trade knowingly. `pine doctor` warns
+when `~/.pine/MEMORY.md` outgrows the cap.
+
+**Relocating and syncing.** Set `PINE_HOME` to move the store (Windows defaults
+to `%USERPROFILE%\.pine`). Pine does not sync it for you — add `~/.pine` to your
+dotfiles if you want it on every machine.
+
+**Opting out.** In a shared repo where your personal preferences shouldn't be
+injected, add to `.pine/config.json`:
+
+```json
+{ "context": { "globalMemory": false } }
+```
+
+This also applies to `pine serve`'s web UI, which renders context through the
+same generator.
+
+> `--cites` paths are repo-relative, so a citation captured with `-g` will
+> dangle in every other repo. Prefer plain statements in global memory.
 
 ### Agent setup
 
@@ -209,6 +266,15 @@ By default **tickets** are tracked (branch-scoped with your code) and
 (`MEMORY.md` / `memory/`) is always committed so it follows you across machines.
 Change this later with `pine setup sync`, or pass `--sync-tickets` /
 `--sync-attachments` (and `--no-*`) to `pine init`.
+
+Your personal memory lives outside any repo, in the machine-wide store — same
+layout, never committed with a project (see [Global memory](#global-memory)):
+
+```
+~/.pine/                # or $PINE_HOME; %USERPROFILE%\.pine on Windows
+  MEMORY.md             # your preferences, in every repo
+  memory/               # your topic files (read on demand by agents)
+```
 
 A ticket file:
 

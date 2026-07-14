@@ -146,18 +146,18 @@ func TestConfidentThresholds(t *testing.T) {
 
 func TestTruncateForContext(t *testing.T) {
 	short := "hello\n"
-	if got := TruncateForContext(short, 100); got != short {
+	if got := TruncateForContext(short, 100, ".pine/MEMORY.md"); got != short {
 		t.Fatalf("short: %q", got)
 	}
 	long := strings.Repeat("line\n", 1000)
-	got := TruncateForContext(long, 80)
+	got := TruncateForContext(long, 80, ".pine/MEMORY.md")
 	if len(got) >= len(long) {
 		t.Fatalf("expected truncation, len=%d", len(got))
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Fatalf("missing notice:\n%s", got)
 	}
-	got = TruncateForContext(long, 0) // default cap
+	got = TruncateForContext(long, 0, ".pine/MEMORY.md") // default cap
 	if len(got) > ContextMEMORYCap+80 {
 		t.Fatalf("default cap too large: %d", len(got))
 	}

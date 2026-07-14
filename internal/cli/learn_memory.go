@@ -12,10 +12,33 @@ import (
 	"github.com/underworld14/pine/internal/store"
 )
 
+// memStore is the memory store a learn command reads or writes: this
+// repository's .pine, or the machine-wide ~/.pine reached with -g.
+//
+// It exists because the memory helpers only ever needed a directory, but took
+// a *store.Store to get one — which is exactly what made -g impossible outside
+// a pine repo.
+type memStore struct {
+	Dir    string // absolute path to the store directory
+	Label  string // user-facing prefix: ".pine" | "~/.pine" | $PINE_HOME
+	Global bool
+}
+
+// Name is the machine-readable store discriminator for --json.
+func (m memStore) Name() string {
+	if m.Global {
+		return "global"
+	}
+	return "project"
+}
+
+func projectStore(s *store.Store) memStore {
+	return memStore{Dir: s.Root(), Label: ".pine"}
+}
+
 // captureMemoryInsight routes a non-ticket insight into MEMORY.md or a topic file.
-func captureMemoryInsight(cmd *cobra.Command, s *store.Store, text string, cites []string, component, to, newTopic string, asJSON bool) error {
-	pineDir := s.Root()
-	if err := memory.EnsureLayout(pineDir); err != nil {
+func captureMemoryInsight(cmd *cobra.Command, ms memStore, text string, cites []string, component, to, newTopic string, asJSON bool) error {
+	if err := memory.EnsureLayout(ms.Dir); err != nil {
 		return err
 	}
 
@@ -26,13 +49,22 @@ func captureMemoryInsight(cmd *cobra.Command, s *store.Store, text string, cites
 		if err != nil {
 			return err
 		}
-		return writeMemoryDest(cmd, pineDir, kind, value, opts, asJSON)
+		return writeMemoryDest(cmd, ms, kind, value, opts, asJSON)
 	}
 	if newTopic != "" {
-		return writeMemoryDest(cmd, pineDir, "new", memory.Slugify(newTopic), opts, asJSON)
+		return writeMemoryDest(cmd, ms, "new", memory.Slugify(newTopic), opts, asJSON)
 	}
 
-	recs, err := memory.Suggest(pineDir, memory.SuggestOpts{
+	if ms.Global {
+		// Like `git config --global`, -g never asks where. Suggest is never
+		// Confident against a store with no topics — the global store's normal
+		// state — so routing -g through it would make `pine learn -g` fail on
+		// first use. Global topics are also only name-listed in pine context,
+		// so auto-filing a fact into one would hide it from agents.
+		return writeMemoryDest(cmd, ms, "memory", memory.FileMEMORY, opts, asJSON)
+	}
+
+	recs, err := memory.Suggest(ms.Dir, memory.SuggestOpts{
 		Text:      text,
 		Cites:     cites,
 		Component: component,
@@ -46,7 +78,7 @@ func captureMemoryInsight(cmd *cobra.Command, s *store.Store, text string, cites
 		if err != nil {
 			return err
 		}
-		return writeMemoryDest(cmd, pineDir, kind, value, opts, asJSON)
+		return writeMemoryDest(cmd, ms, kind, value, opts, asJSON)
 	}
 
 	if asJSON {
@@ -62,16 +94,16 @@ func captureMemoryInsight(cmd *cobra.Command, s *store.Store, text string, cites
 	return fmt.Errorf("ambiguous learning destination")
 }
 
-func writeMemoryDest(cmd *cobra.Command, pineDir, kind, value string, opts memory.AppendOpts, asJSON bool) error {
+func writeMemoryDest(cmd *cobra.Command, ms memStore, kind, value string, opts memory.AppendOpts, asJSON bool) error {
 	var dest string
 	switch kind {
 	case "memory":
-		if err := memory.AppendMEMORY(pineDir, opts); err != nil {
+		if err := memory.AppendMEMORY(ms.Dir, opts); err != nil {
 			return err
 		}
 		dest = memory.FileMEMORY
 	case "topic", "new":
-		if err := memory.AppendTopic(pineDir, value, opts); err != nil {
+		if err := memory.AppendTopic(ms.Dir, value, opts); err != nil {
 			return err
 		}
 		dest = filepath.ToSlash(filepath.Join(memory.DirTopics, memory.Slugify(value)+".md"))
@@ -80,12 +112,15 @@ func writeMemoryDest(cmd *cobra.Command, pineDir, kind, value string, opts memor
 	}
 	if asJSON {
 		return writeJSON(cmd.OutOrStdout(), map[string]any{
-			"path": dest,
-			"kind": kind,
-			"text": opts.Text,
+			"path":  dest,
+			"kind":  kind,
+			"text":  opts.Text,
+			"store": ms.Name(),
 		})
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Appended to .pine/%s\n", dest)
+	// ms.Label is ".pine" for a project store, so this stays byte-identical
+	// to the message this command has always printed.
+	fmt.Fprintf(cmd.OutOrStdout(), "Appended to %s/%s\n", ms.Label, dest)
 	return nil
 }
 
@@ -138,14 +173,14 @@ func newLearnSuggestCmd() *cobra.Command {
 }
 
 // tryShowMemory prints MEMORY.md or a topic file. Returns handled=true when id is a memory path.
-func tryShowMemory(cmd *cobra.Command, s *store.Store, id string, asJSON bool) (handled bool, err error) {
+func tryShowMemory(cmd *cobra.Command, ms memStore, id string, asJSON bool) (handled bool, err error) {
 	lower := strings.ToLower(id)
 	isMem := lower == "memory.md" || strings.HasPrefix(lower, "memory/") ||
 		strings.EqualFold(id, memory.FileMEMORY) || strings.HasPrefix(id, ".pine/")
 	if !isMem && !strings.HasPrefix(lower, "new:") {
 		// bare slug with .md only if file exists
 		if !strings.HasSuffix(lower, ".md") && !strings.Contains(id, "/") {
-			path := memory.TopicPath(s.Root(), id)
+			path := memory.TopicPath(ms.Dir, id)
 			if _, e := os.Stat(path); e != nil {
 				return false, nil
 			}
@@ -158,7 +193,7 @@ func tryShowMemory(cmd *cobra.Command, s *store.Store, id string, asJSON bool) (
 	if err != nil {
 		return false, nil
 	}
-	pineDir := s.Root()
+	pineDir := ms.Dir
 	switch kind {
 	case "memory":
 		body, err := memory.ReadMEMORY(pineDir)
@@ -194,10 +229,16 @@ func tryShowMemory(cmd *cobra.Command, s *store.Store, id string, asJSON bool) (
 	return false, nil
 }
 
-func listMemoryEntries(cmd *cobra.Command, s *store.Store) error {
-	pineDir := s.Root()
-	_ = memory.EnsureLayout(pineDir)
-	fmt.Fprintln(cmd.OutOrStdout(), "MEMORY / topics:")
+func listMemoryEntries(cmd *cobra.Command, ms memStore) error {
+	pineDir := ms.Dir
+	// Deliberately does not ensure the layout: listing is a read, and against
+	// the global store this would create ~/.pine and seed it with the *project*
+	// text. ReadMEMORY and ListTopics both degrade cleanly when absent.
+	header := "MEMORY / topics:"
+	if ms.Global {
+		header = "Global MEMORY / topics:"
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), header)
 	if body, err := memory.ReadMEMORY(pineDir); err == nil && strings.TrimSpace(body) != "" {
 		lines := len(strings.Split(strings.TrimSpace(body), "\n"))
 		fmt.Fprintf(cmd.OutOrStdout(), "  MEMORY.md\t(%d lines)\n", lines)
@@ -214,6 +255,29 @@ func listMemoryEntries(cmd *cobra.Command, s *store.Store) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout())
 	return nil
+}
+
+// listMemoryJSON is the --json rendering of listMemoryEntries. It exists
+// because the LRN listing it normally shares needs a *store.Store, which -g
+// does not have.
+func listMemoryJSON(cmd *cobra.Command, ms memStore) error {
+	out := map[string]any{"store": ms.Name()}
+	if body, err := memory.ReadMEMORY(ms.Dir); err == nil && strings.TrimSpace(body) != "" {
+		out["memory"] = map[string]any{
+			"path":  memory.FileMEMORY,
+			"lines": len(strings.Split(strings.TrimSpace(body), "\n")),
+		}
+	}
+	topics, err := memory.ListTopics(ms.Dir)
+	if err != nil {
+		return err
+	}
+	list := make([]map[string]any, 0, len(topics))
+	for _, t := range topics {
+		list = append(list, map[string]any{"path": t.RelPath, "slug": t.Slug, "title": t.Title})
+	}
+	out["topics"] = list
+	return writeJSON(cmd.OutOrStdout(), out)
 }
 
 func searchMemoryInto(idx *search.Index, pineDir string) {

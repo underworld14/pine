@@ -21,7 +21,9 @@ func Suggest(pineDir string, opts SuggestOpts) ([]Recommendation, error) {
 	if text == "" {
 		return nil, fmt.Errorf("insight text is required")
 	}
-	_ = EnsureLayout(pineDir)
+	// Deliberately does not ensure the layout: `pine learn suggest` is a
+	// read ("no write" per its help), and the write path already ensures
+	// before calling here. ReadMEMORY/ListTopics degrade cleanly if absent.
 
 	idx, err := search.New()
 	if err != nil {

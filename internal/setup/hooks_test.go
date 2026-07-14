@@ -447,3 +447,21 @@ func TestRemoveCodexHookOnlyScript(t *testing.T) {
 		t.Fatalf("%v %v", removed, err)
 	}
 }
+
+func TestLearnReminderMentionsGlobal(t *testing.T) {
+	txt := learnReminderText()
+	for _, want := range []string{"pine learn", "pine learn -g", hookSentinel} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("reminder missing %q:\n%s", want, txt)
+		}
+	}
+}
+
+func TestLearnReminderTextIsShellSafe(t *testing.T) {
+	// settings.go embeds this raw inside echo "…" inside JSON: a double quote,
+	// backtick, dollar sign or backslash would emit a broken shell command.
+	if i := strings.IndexAny(learnReminderText(), "\"`$\\"); i >= 0 {
+		t.Fatalf("reminder must stay shell-safe for the Claude echo hook; found %q at %d in:\n%s",
+			learnReminderText()[i], i, learnReminderText())
+	}
+}

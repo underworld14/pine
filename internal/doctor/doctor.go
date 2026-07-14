@@ -5,6 +5,7 @@ package doctor
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/learning"
+	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/store"
 	"github.com/underworld14/pine/internal/syncignore"
 	"github.com/underworld14/pine/internal/ticket"
@@ -168,11 +170,42 @@ func Run(s *store.Store) *Report {
 	checkAttachmentDirs(r, s, byID, cfg.Attachments.MaxVideoMB)
 	checkGitignore(r, root)
 	checkMergeDriver(r, root)
+	checkGlobalMemory(r, cfg)
 
 	if !r.HasErrors() {
 		r.ok("no problems found")
 	}
 	return r
+}
+
+// checkGlobalMemory reports on the machine-wide memory store that pine context
+// injects above Project Memory. It creates nothing: a missing global store is
+// the default state, not a finding.
+func checkGlobalMemory(r *Report, cfg *config.Config) {
+	if !cfg.Context.GlobalMemory {
+		return // opted out — nothing is injected, so there is nothing to check
+	}
+	dir, err := memory.GlobalDir()
+	if err != nil {
+		r.warn("cannot resolve a home directory for global memory — set PINE_HOME to choose a location")
+		return
+	}
+	label := memory.GlobalLabel(dir) + "/" + memory.FileMEMORY
+	body, err := memory.ReadMEMORY(dir)
+	if err != nil {
+		r.warn(label + " is not readable — pine context will omit your global preferences")
+		return
+	}
+	n := len(strings.TrimSpace(body))
+	if n == 0 {
+		return // no global store yet; that is normal
+	}
+	if n > memory.ContextGlobalCap {
+		r.warn(fmt.Sprintf("global memory %s is %d bytes — pine context injects only the first %d; move detail into %s/memory/<topic>.md",
+			label, n, memory.ContextGlobalCap, memory.GlobalLabel(dir)))
+		return
+	}
+	r.ok(fmt.Sprintf("global memory %s is %d bytes", label, n))
 }
 
 func checkAttachmentRefs(r *Report, s *store.Store, t *ticket.Ticket) {

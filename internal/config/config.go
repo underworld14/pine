@@ -28,6 +28,7 @@ type Config struct {
 	IDStyle     string       `json:"idStyle"` // "hash" (default) | "sequential"
 	CrossBranch CrossBranch  `json:"crossBranch"`
 	Sync        Sync         `json:"sync"`
+	Context     Context      `json:"context"`
 
 	// Extra holds unknown top-level keys, preserved verbatim on save.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -74,6 +75,15 @@ type Sync struct {
 	Attachments bool `json:"attachments"`
 }
 
+// Context controls what pine context injects beyond this repository.
+// GlobalMemory injects the machine-wide store at ~/.pine (see pine learn -g)
+// above Project Memory; set it false in shared repos where personal
+// preferences should not appear. It also gates pine serve's web UI, which
+// renders context through the same generator.
+type Context struct {
+	GlobalMemory bool `json:"globalMemory"`
+}
+
 var prefixRe = regexp.MustCompile(`^[A-Z][A-Z0-9]*$`)
 
 // Default returns the configuration pine init writes for a fresh project.
@@ -92,6 +102,7 @@ func Default(projectName string) *Config {
 		IDStyle:     "hash",
 		CrossBranch: CrossBranch{Enabled: true, ActiveBranchDays: 30},
 		Sync:        Sync{Tickets: true, Attachments: false},
+		Context:     Context{GlobalMemory: true},
 	}
 }
 
@@ -153,6 +164,8 @@ func parseOnto(c *Config, data []byte) (*Config, error) {
 			_ = json.Unmarshal(raw, &c.CrossBranch)
 		case "sync":
 			_ = json.Unmarshal(raw, &c.Sync)
+		case "context":
+			_ = json.Unmarshal(raw, &c.Context)
 		default:
 			if c.Extra == nil {
 				c.Extra = map[string]json.RawMessage{}
@@ -176,6 +189,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		{"idStyle", c.IDStyle},
 		{"crossBranch", c.CrossBranch},
 		{"sync", c.Sync},
+		{"context", c.Context},
 	}, c.Extra)
 }
 

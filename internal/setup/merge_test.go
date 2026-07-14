@@ -90,6 +90,9 @@ func TestRenderSectionIncludesHeader(t *testing.T) {
 	if !strings.Contains(section, "pine learn") || !strings.Contains(section, "load the pine skill") {
 		t.Fatalf("summary + skill pointer missing:\n%s", section)
 	}
+	if !strings.Contains(section, "pine learn -g") {
+		t.Fatalf("global memory rule missing:\n%s", section)
+	}
 	if !strings.Contains(section, ".agents/skills/pine/SKILL.md") {
 		t.Fatalf("skill path missing:\n%s", section)
 	}
@@ -108,6 +111,9 @@ func TestRenderSkillIsComprehensive(t *testing.T) {
 		"--cites",
 		"todo, doing, done",
 		"pine context",
+		"Memory discipline",
+		"pine learn -g",
+		"~/.pine",
 	} {
 		if !strings.Contains(skill, want) {
 			t.Fatalf("skill missing %q:\n%s", want, skill)

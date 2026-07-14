@@ -558,3 +558,73 @@ func TestHasPriorityCaseInsensitive(t *testing.T) {
 		t.Errorf("HasPriority should match case-insensitively")
 	}
 }
+
+func TestDefaultEnablesGlobalMemory(t *testing.T) {
+	c := Default("x")
+	if !c.Context.GlobalMemory {
+		t.Errorf("global memory should default to enabled")
+	}
+}
+
+func TestParseKeepsGlobalMemoryDefaultWhenContextAbsent(t *testing.T) {
+	// Every config.json on disk today has no "context" key.
+	c, err := Parse([]byte(`{"version":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Context.GlobalMemory {
+		t.Errorf("absent context section must keep globalMemory=true")
+	}
+}
+
+func TestParseContextEmptyObjectKeepsDefault(t *testing.T) {
+	c, err := Parse([]byte(`{"version":1,"context":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Context.GlobalMemory {
+		t.Errorf("empty context object must keep globalMemory=true")
+	}
+}
+
+func TestParseGlobalMemoryFalse(t *testing.T) {
+	c, err := Parse([]byte(`{"version":1,"context":{"globalMemory":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Context.GlobalMemory {
+		t.Errorf("explicit false must disable global memory")
+	}
+}
+
+func TestMarshalRoundTripsContext(t *testing.T) {
+	c := Default("x")
+	c.Context.GlobalMemory = false
+	b, err := c.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "globalMemory") {
+		t.Fatalf("context key dropped on save:\n%s", b)
+	}
+	if strings.Contains(string(b), "global_memory") {
+		t.Fatalf("key must be camelCase, not snake_case:\n%s", b)
+	}
+	back, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Context.GlobalMemory {
+		t.Errorf("globalMemory=false did not survive a round trip")
+	}
+}
+
+func TestContextIsNotRoutedToExtra(t *testing.T) {
+	c, err := Parse([]byte(`{"version":1,"context":{"globalMemory":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Extra["context"]; ok {
+		t.Errorf("context must be a typed key, not routed to Extra")
+	}
+}
