@@ -15,16 +15,24 @@
   const right = $derived(n.dependents);
   const leftCount = $derived(left.length + (n.truncated.blockers > 0 ? 1 : 0));
   const rightCount = $derived(right.length + (n.truncated.dependents > 0 ? 1 : 0));
-  const isEmpty = $derived(!n.parent && !left.length && !right.length && !n.children.length && !n.dangling.length);
+  const isEmpty = $derived(!n.parent && !left.length && !right.length && !n.children.length && !n.dangling.length && !n.memory.length);
 
   const midRows = $derived(Math.max(leftCount, rightCount, 1));
   const topBand = $derived(n.parent ? 58 : 6);
-  const bottomBand = $derived(n.children.length || n.truncated.children > 0 ? 62 : 6);
+  const memBand = $derived(n.memory.length || n.truncated.memory > 0 ? 56 : 0);
+  const bottomBand = $derived((n.children.length || n.truncated.children > 0 ? 62 : 6) + memBand);
   const midH = $derived(midRows * PITCH);
   const height = $derived(topBand + midH + bottomBand);
   const width = 2 * COLGAP + NW + 60;
   const cx = COLGAP + 30;
   const centerY = $derived(topBand + midH / 2 - NH / 2);
+
+  function hrefFor(ref: { id: string; kind?: string }): string | null {
+    if (ref.kind === 'ticket' || (!ref.kind && !ref.id.includes('/'))) return `/tickets/${ref.id}`;
+    if (ref.kind === 'topic' || ref.id.startsWith('memory/')) return '/graph';
+    if (ref.kind === 'memory' || ref.id === 'MEMORY') return '/graph';
+    return '/graph';
+  }
 
   function colY(i: number, count: number): number {
     return topBand + (midH - count * PITCH) / 2 + i * PITCH;
@@ -42,7 +50,7 @@
 </script>
 
 {#if isEmpty}
-  <p class="empty">No dependencies or epic links.</p>
+  <p class="empty">No dependencies, epic links, or memory links.</p>
 {:else}
   <svg class="graph" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Relationships for ${ticket.id}`}>
     <defs>
@@ -125,6 +133,29 @@
       {@const y = topBand + midH + 16}
       <text class="overflow" x={x} y={y + 15}>+{n.truncated.children} more</text>
     {/if}
+
+    {#each n.memory as ref, i (ref.id)}
+      {@const memW = 100}
+      {@const startX = cx + NW / 2 - (n.memory.length * (memW + 8) - 8) / 2}
+      {@const x = startX + i * (memW + 8)}
+      {@const y = topBand + midH + (n.children.length || n.truncated.children > 0 ? 62 : 12)}
+      <path class="edge dashed mem" d={`M${cx + NW / 2},${centerY + NH} L${x + memW / 2},${y}`} />
+      {@const href = hrefFor(ref)}
+      {#if href}
+        <a href={href}>
+          <rect class="node mem" x={x} y={y} width={memW} height={NH - 8} rx="8" />
+          <text class="nid" x={x + 8} y={y + 15}>{ref.title}</text>
+          <text class="nsub" x={x + 8} y={y + 27}>{ref.kind ?? 'link'}</text>
+        </a>
+      {/if}
+    {/each}
+    {#if n.truncated.memory > 0}
+      {@const memW = 100}
+      {@const startX = cx + NW / 2 - (n.memory.length * (memW + 8) - 8) / 2}
+      {@const x = startX + n.memory.length * (memW + 8)}
+      {@const y = topBand + midH + (n.children.length || n.truncated.children > 0 ? 62 : 12)}
+      <text class="overflow" x={x} y={y + 15}>+{n.truncated.memory} more</text>
+    {/if}
   </svg>
 
   <ul class="sr-only">
@@ -135,6 +166,7 @@
     {#if n.truncated.dependents > 0}<li>+{n.truncated.dependents} more dependents not shown</li>{/if}
     {#each n.children as c}<li>Child <a href={`/tickets/${c.id}`}>{c.id}</a></li>{/each}
     {#if n.truncated.children > 0}<li>+{n.truncated.children} more children not shown</li>{/if}
+    {#each n.memory as m}<li>Linked {m.kind ?? 'ref'} {m.id}</li>{/each}
     {#each n.dangling as id}<li>Missing dependency {id}</li>{/each}
   </ul>
 {/if}
@@ -146,6 +178,7 @@
   .node.center { stroke: var(--color-accent); stroke-width: 2.5; }
   .node.epic { stroke-dasharray: 4 3; }
   .node.missing { fill: none; stroke: var(--color-border); stroke-dasharray: 3 3; }
+  .node.mem { stroke: var(--color-accent); stroke-dasharray: 2 2; }
   .nid { font-family: var(--font-mono); font-size: 11px; fill: var(--color-text); }
   .nid.dim { fill: var(--color-dim); }
   .nsub { font-family: var(--font-mono); font-size: 8.5px; fill: var(--color-dim); }
@@ -155,6 +188,7 @@
   .edge.cycle { stroke: var(--color-danger); }
   .edge.dashed { stroke: var(--color-dim); stroke-dasharray: 5 4; }
   .edge.dim { stroke: var(--color-border); }
+  .edge.mem { stroke: var(--color-accent); opacity: 0.7; }
   a { cursor: pointer; }
   a:focus-visible rect { outline: 2px solid var(--color-accent); outline-offset: 1px; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

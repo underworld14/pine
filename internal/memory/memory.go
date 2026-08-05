@@ -54,6 +54,7 @@ type Topic struct {
 	RelPath string // memory/<slug>.md
 	Title   string
 	Body    string
+	Links   []string // typed graph refs (ticket / LRN-* / memory/<slug> / MEMORY)
 	Updated time.Time
 }
 
@@ -156,14 +157,16 @@ func ReadTopic(pineDir, slug string) (Topic, error) {
 	}
 	body := string(data)
 	updated := time.Time{}
+	var links []string
 	if fi, err := os.Stat(path); err == nil {
 		updated = fi.ModTime().UTC()
 	}
-	if fm, rest, ok := splitFrontmatter(body); ok {
+	if fm, rest, ok := splitFrontmatterRaw(body); ok {
 		body = rest
-		if u, err := time.Parse(time.RFC3339, strings.TrimSpace(fm["updated"])); err == nil {
+		if u, err := time.Parse(time.RFC3339, strings.TrimSpace(fmt.Sprint(fm["updated"]))); err == nil {
 			updated = u
 		}
+		links = decodeLinksAny(fm["links"])
 	}
 	title := slug
 	for _, line := range strings.Split(body, "\n") {
@@ -178,6 +181,7 @@ func ReadTopic(pineDir, slug string) (Topic, error) {
 		RelPath: filepath.ToSlash(filepath.Join(DirTopics, slug+".md")),
 		Title:   title,
 		Body:    body,
+		Links:   links,
 		Updated: updated,
 	}, nil
 }
@@ -241,11 +245,11 @@ func AppendTopic(pineDir, slug string, opts AppendOpts) error {
 		return err
 	}
 
-	// Refresh updated in frontmatter when present.
-	if fm, rest, ok := splitFrontmatter(content); ok {
+	// Refresh updated in frontmatter when present; preserve links.
+	if fm, rest, ok := splitFrontmatterRaw(content); ok {
 		fm["topic"] = slug
 		fm["updated"] = now.Format(time.RFC3339)
-		content = joinFrontmatter(fm) + rest
+		content = joinFrontmatterRaw(fm) + rest
 	}
 
 	bullet := formatBullet(now, text, opts.Cites)
@@ -254,6 +258,38 @@ func AppendTopic(pineDir, slug string, opts AppendOpts) error {
 	}
 	content += bullet + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// SetTopicLinks replaces the links frontmatter on a topic file, creating the
+// file with a stub body when it does not yet exist.
+func SetTopicLinks(pineDir, slug string, links []string) error {
+	if err := EnsureLayout(pineDir); err != nil {
+		return err
+	}
+	slug = Slugify(slug)
+	path := TopicPath(pineDir, slug)
+	now := time.Now().UTC()
+	var content string
+	if data, err := os.ReadFile(path); err == nil {
+		content = string(data)
+	} else if os.IsNotExist(err) {
+		content = fmt.Sprintf("---\ntopic: %s\nupdated: %s\n---\n\n# %s\n\n", slug, now.Format(time.RFC3339), slug)
+	} else {
+		return err
+	}
+	fm, rest, ok := splitFrontmatterRaw(content)
+	if !ok {
+		fm = map[string]any{}
+		rest = content
+	}
+	fm["topic"] = slug
+	fm["updated"] = now.Format(time.RFC3339)
+	if len(links) == 0 {
+		delete(fm, "links")
+	} else {
+		fm["links"] = append([]string(nil), links...)
+	}
+	return os.WriteFile(path, []byte(joinFrontmatterRaw(fm)+rest), 0o644)
 }
 
 func formatBullet(now time.Time, text string, cites []string) string {
@@ -282,6 +318,19 @@ func appendUnderHeading(content, heading, bullet string) string {
 }
 
 func splitFrontmatter(content string) (map[string]string, string, bool) {
+	raw, rest, ok := splitFrontmatterRaw(content)
+	if !ok {
+		return nil, content, false
+	}
+	fm := map[string]string{}
+	for k, v := range raw {
+		fm[k] = fmt.Sprint(v)
+	}
+	return fm, rest, true
+}
+
+// splitFrontmatterRaw keeps typed YAML values (needed for links arrays).
+func splitFrontmatterRaw(content string) (map[string]any, string, bool) {
 	if !strings.HasPrefix(content, "---\n") {
 		return nil, content, false
 	}
@@ -296,24 +345,32 @@ func splitFrontmatter(content string) (map[string]string, string, bool) {
 	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {
 		return nil, content, false
 	}
-	fm := map[string]string{}
-	for k, v := range node {
-		fm[k] = fmt.Sprint(v)
+	if node == nil {
+		node = map[string]any{}
 	}
-	return fm, body, true
+	return node, body, true
 }
 
 func joinFrontmatter(fm map[string]string) string {
-	// Stable key order for topic files.
-	keys := []string{"topic", "updated"}
+	raw := make(map[string]any, len(fm))
+	for k, v := range fm {
+		raw[k] = v
+	}
+	return joinFrontmatterRaw(raw)
+}
+
+func joinFrontmatterRaw(fm map[string]any) string {
+	keys := []string{"topic", "updated", "links"}
 	seen := map[string]bool{}
 	var b strings.Builder
 	b.WriteString("---\n")
 	for _, k := range keys {
-		if v, ok := fm[k]; ok {
-			fmt.Fprintf(&b, "%s: %s\n", k, v)
-			seen[k] = true
+		v, ok := fm[k]
+		if !ok {
+			continue
 		}
+		seen[k] = true
+		writeFMValue(&b, k, v)
 	}
 	var extra []string
 	for k := range fm {
@@ -323,10 +380,59 @@ func joinFrontmatter(fm map[string]string) string {
 	}
 	sort.Strings(extra)
 	for _, k := range extra {
-		fmt.Fprintf(&b, "%s: %s\n", k, fm[k])
+		writeFMValue(&b, k, fm[k])
 	}
 	b.WriteString("---\n")
 	return b.String()
+}
+
+func writeFMValue(b *strings.Builder, k string, v any) {
+	switch x := v.(type) {
+	case []string:
+		fmt.Fprintf(b, "%s:\n", k)
+		for _, s := range x {
+			fmt.Fprintf(b, "  - %s\n", s)
+		}
+	case []any:
+		fmt.Fprintf(b, "%s:\n", k)
+		for _, item := range x {
+			fmt.Fprintf(b, "  - %s\n", fmt.Sprint(item))
+		}
+	default:
+		fmt.Fprintf(b, "%s: %s\n", k, fmt.Sprint(v))
+	}
+}
+
+func decodeLinksAny(v any) []string {
+	if v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case []string:
+		out := make([]string, 0, len(x))
+		for _, s := range x {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s := strings.TrimSpace(fmt.Sprint(item)); s != "" && s != "<nil>" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	default:
+		return nil
+	}
 }
 
 // ResolveTo normalizes a --to argument into ("memory"|"topic"|"new", pathOrSlug).

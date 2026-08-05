@@ -15,6 +15,35 @@ This repository uses [Pine](https://github.com/underworld14/pine) — git-native
 4. Write back: edit `.pine/tickets/<ID>.md` (update `status`, add fix notes) or use `pine update` / `pine close`.
 5. Run `pine doctor` before committing (add `--fix` to auto-repair mechanical issues).
 
+## Plan → ticket → close with evidence (agent workflow)
+
+When you own the work end-to-end (planning a non-trivial change, implementing it,
+then closing it out), keep Pine in the loop so the work is traceable and
+auditable:
+
+1. **Planning a non-trivial task** — before writing code, create a ticket so
+   the work is tracked from the start:
+   ```text
+   pine create --type feature --title "<short plan title>"
+   ```
+   Capture the printed `<ID>`, then move it to `doing`:
+   ```text
+   pine update <ID> --status doing
+   ```
+   (Skip this for trivial, single-step changes — Pine is for real work, not
+   every edit.)
+2. **While working** — keep notes/decisions in `.pine/tickets/<ID>.md`. If you
+   discover a durable insight, `pine learn "…"`.
+3. **When the work is done** — close the ticket AND attach the file-change
+   evidence in one step:
+   ```text
+   pine close <ID> --evidence
+   ```
+   This marks the ticket `done` and appends a `## Work Evidence` section
+   (commits that reference/touch the ticket + a `git diff --stat` from the
+   commit at its creation time to the working tree) to the ticket body — a
+   durable record of what changed and why.
+
 ## Essential commands
 
 ```text
@@ -25,6 +54,7 @@ pine context                     # full project briefing (run at session start)
 pine list [--json]               # filterable ticket list
 pine log <ID> [--json]           # commits that reference or touch this ticket
 pine create / update / close     # CLI mutations
+pine close <ID> --evidence       # mark done + attach file-change evidence
 pine learn "<insight>"           # capture a durable cross-agent learning
 pine learn list / search / show  # inspect learnings
 pine learn supersede / rm        # replace or delete a learning

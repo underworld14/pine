@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/underworld14/pine/internal/config"
+	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/store"
 	"github.com/underworld14/pine/internal/ticket"
 )
@@ -622,6 +623,52 @@ func TestFixDanglingDep(t *testing.T) {
 	r2 := Run(reopen(t, pine))
 	if strings.Contains(msgs(r2), "dangling dependency") {
 		t.Errorf("dangling dep should be gone:\n%s", msgs(r2))
+	}
+}
+
+// TestFixDanglingTicketLink covers checkTicketLinks' dangling-link fix path:
+// a ticket with a Links ref to a non-existent ticket is flagged and removable.
+func TestFixDanglingTicketLink(t *testing.T) {
+	s, pine := scaffold(t)
+	tk, err := s.Create(store.CreateReq{Type: "bug", Title: "has bad link"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(tk.ID, func(x *ticket.Ticket) error { x.Links = []string{"BUG-999"}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(s)
+	f := findByCode(r, "dangling-link")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable dangling-link, findings:\n%s", msgs(r))
+	}
+	if err := f.Fix(s); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+	r2 := Run(reopen(t, pine))
+	if strings.Contains(msgs(r2), "dangling link") {
+		t.Errorf("dangling link should be gone:\n%s", msgs(r2))
+	}
+}
+
+// TestFixDanglingTopicLink covers checkTopicLinks' dangling-topic-link fix:
+// a memory topic with a link to a non-existent ticket is flagged and removable.
+func TestFixDanglingTopicLink(t *testing.T) {
+	s, pine := scaffold(t)
+	if err := memory.SetTopicLinks(pine, "web", []string{"BUG-999"}); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(s)
+	f := findByCode(r, "dangling-topic-link")
+	if !f.Fixable() {
+		t.Fatalf("expected fixable dangling-topic-link, findings:\n%s", msgs(r))
+	}
+	if err := f.Fix(s); err != nil {
+		t.Fatalf("fix: %v", err)
+	}
+	r2 := Run(reopen(t, pine))
+	if strings.Contains(msgs(r2), "dangling-topic-link") {
+		t.Errorf("dangling topic link should be gone:\n%s", msgs(r2))
 	}
 }
 

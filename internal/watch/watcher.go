@@ -24,6 +24,7 @@ const (
 	KindConfig
 	KindBoard
 	KindLearning
+	KindMemory // MEMORY.md or memory/<topic>.md — invalidates the links graph cache
 )
 
 // Event is a debounced, classified change at a path.
@@ -62,6 +63,7 @@ func New(pineDir string) (*Watcher, error) {
 	_ = fsw.Add(pineDir)
 	_ = fsw.Add(filepath.Join(pineDir, "tickets"))
 	_ = fsw.Add(filepath.Join(pineDir, "learnings"))
+	_ = fsw.Add(filepath.Join(pineDir, "memory"))
 	go w.loop()
 	return w, nil
 }
@@ -164,6 +166,8 @@ func (w *Watcher) classify(path string) (Event, bool) {
 			id := strings.TrimSuffix(base, ".md")
 			return Event{Kind: KindLearning, Path: path, ID: id}, true
 		}
+	case rel == "MEMORY.md", strings.HasPrefix(rel, "memory/"):
+		return Event{Kind: KindMemory, Path: path}, true
 	}
 	return Event{}, false
 }

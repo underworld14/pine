@@ -223,10 +223,17 @@ func newUpdateCmd() *cobra.Command {
 // --- close ---
 
 func newCloseCmd() *cobra.Command {
-	return &cobra.Command{
+	var evidence bool
+	cmd := &cobra.Command{
 		Use:   "close <ID>...",
 		Short: "Mark one or more tickets done",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Mark one or more tickets done.
+
+With --evidence, append a "## Work Evidence" section to each ticket's body
+(commits that reference/touch it + a diffstat from the commit at its creation
+time to the working tree) before marking it done — a durable record of what
+changed, suitable for review and audits.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
@@ -234,17 +241,32 @@ func newCloseCmd() *cobra.Command {
 			}
 			for _, arg := range args {
 				id := normalizeID(arg)
+				// Compute evidence BEFORE the locked update so git never runs
+				// under the store write lock.
+				ev := ""
+				if evidence {
+					ev = workEvidence(s, id)
+				}
 				if _, err := s.Update(id, func(u *ticket.Ticket) error {
 					u.Status = ticket.StatusDone
+					if evidence {
+						u.Body = appendEvidence(u.Body, ev)
+					}
 					return nil
 				}); err != nil {
 					return fmt.Errorf("%s: %w", id, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Closed %s\n", id)
+				if evidence {
+					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (with work evidence)\n", id)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s\n", id)
+				}
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&evidence, "evidence", false, "attach a Work Evidence section (commits + file changes) to each ticket before marking it done")
+	return cmd
 }
 
 // --- shared helpers ---

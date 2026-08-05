@@ -162,3 +162,36 @@ func TestTitleWithColonQuoted(t *testing.T) {
 		t.Errorf("title = %q", reparsed.Title)
 	}
 }
+
+func TestParseLinksRoundTrip(t *testing.T) {
+	raw := `---
+id: BUG-001
+title: Linked bug
+status: todo
+priority: medium
+links:
+    - memory/web
+    - LRN-001
+    - MEMORY
+created: 2026-07-04T10:12:00Z
+updated: 2026-07-04T11:00:00Z
+---
+
+# Description
+`
+	tk := Parse("BUG-001", []byte(raw))
+	if tk.Degraded {
+		t.Fatalf("degraded: %v", tk.Warnings)
+	}
+	if len(tk.Links) != 3 || tk.Links[0] != "memory/web" || tk.Links[1] != "LRN-001" || tk.Links[2] != "MEMORY" {
+		t.Fatalf("links = %v", tk.Links)
+	}
+	out := string(tk.Serialize())
+	if !strings.Contains(out, "links:") || !strings.Contains(out, "memory/web") {
+		t.Errorf("serialize missing links:\n%s", out)
+	}
+	tk2 := Parse("BUG-001", []byte(out))
+	if len(tk2.Links) != 3 {
+		t.Errorf("round-trip links = %v", tk2.Links)
+	}
+}

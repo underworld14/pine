@@ -7,6 +7,7 @@
   import NewIssueModal from '$lib/components/NewIssueModal.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import Toasts from '$lib/components/Toasts.svelte';
+  import RepoSwitcher from '$lib/components/RepoSwitcher.svelte';
 
   let { children } = $props();
   let gSeq = 0;
@@ -35,6 +36,7 @@
     else if (e.key === 'g') { gSeq = Date.now(); }
     else if (e.key === 'd' && Date.now() - gSeq < 800) { goto('/'); }
     else if (e.key === 'b' && Date.now() - gSeq < 800) { goto('/board'); }
+    else if (e.key === 'r' && Date.now() - gSeq < 800) { goto('/graph'); }
   }
 
   import { goto } from '$app/navigation';
@@ -50,9 +52,11 @@
   <aside class="sidebar">
     <div class="brand">🌲 <span>{project}</span></div>
     <button class="new" onclick={() => ui.openModal({ type: 'bug' })}>+ New issue <kbd>c</kbd></button>
+    <RepoSwitcher />
     <nav>
       <a href="/" class:active={path === '/'}>Dashboard <kbd>g d</kbd></a>
       <a href="/board" class:active={path.startsWith('/board')}>Board <kbd>g b</kbd></a>
+      <a href="/graph" class:active={path.startsWith('/graph')}>Graph <kbd>g r</kbd></a>
       <a href="/search" class:active={path.startsWith('/search')}>Search <kbd>/</kbd></a>
     </nav>
     <div class="footer">

@@ -27,8 +27,8 @@ func newOpenCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "Pine already running — opening %s\n", uiURL)
 				return browser.OpenURL(uiURL)
 			}
-			// Not running: start serving and open the browser.
-			return runServe(cmd, port, host, true, false)
+		// Not running: start serving and open the browser.
+		return runServe(cmd, port, host, true, false, false)
 		},
 	}
 	f := cmd.Flags()

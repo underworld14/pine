@@ -27,6 +27,7 @@ type CreateReq struct {
 	Labels   []string
 	Deps     []string
 	Parent   string
+	Links    []string
 	Status   string
 	Body     string
 }
@@ -72,6 +73,7 @@ func (s *Store) Create(req CreateReq) (*ticket.Ticket, error) {
 		Labels:   req.Labels,
 		Deps:     req.Deps,
 		Parent:   req.Parent,
+		Links:    req.Links,
 		Created:  now,
 		Updated:  now,
 		Body:     body,
@@ -82,6 +84,7 @@ func (s *Store) Create(req CreateReq) (*ticket.Ticket, error) {
 		_ = os.Remove(s.ticketPath(id))
 		return nil, err
 	}
+	s.InvalidateLinksGraph()
 	return cloneTicket(t), nil
 }
 

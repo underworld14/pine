@@ -69,6 +69,17 @@ type Client interface {
 	// (either may be empty), de-duplicated by commit and newest first, capped
 	// at limit.
 	Log(ctx context.Context, pathspec, grep string, limit int) []Commit
+
+	// CommitBefore returns the full SHA of the most recent commit at or before t,
+	// or "" when there is no such commit, t is zero, or this is not a git repo.
+	// Used to anchor "work evidence" to a ticket's creation time.
+	CommitBefore(ctx context.Context, t time.Time) string
+
+	// DiffStat returns a `git diff --stat`-style summary of all changes from base
+	// to the working tree (committed-to-HEAD plus uncommitted). When base is empty,
+	// only uncommitted workdir changes (vs HEAD) are reported. Returns "" when
+	// there are no changes or git is unavailable.
+	DiffStat(ctx context.Context, base string) string
 }
 
 const maxChanges = 100
@@ -305,6 +316,42 @@ func shortHash(h string) string {
 	return h
 }
 
+// CommitBefore returns the full SHA of the most recent commit at or before t.
+// Empty when t is zero, there is no such commit, or this is not a git repo.
+func (c *cli) CommitBefore(ctx context.Context, t time.Time) string {
+	if t.IsZero() || !c.IsRepo(ctx) {
+		return ""
+	}
+	// %cI is the committer date in strict ISO-8601; --before needs a date that
+	// git can parse. RFC3339 is accepted.
+	out, err := c.run(ctx, "log", "--before="+t.UTC().Format(time.RFC3339), "-1", "--format=%H")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// DiffStat returns a `git diff --stat` summary of changes from base to the
+// working tree. When base is empty, only uncommitted workdir changes (vs HEAD)
+// are reported. Empty when there are no changes or git is unavailable.
+func (c *cli) DiffStat(ctx context.Context, base string) string {
+	if !c.IsRepo(ctx) {
+		return ""
+	}
+	args := []string{"diff", "--stat"}
+	if strings.TrimSpace(base) != "" {
+		args = append(args, base)
+	} else {
+		// No base: compare the working tree to HEAD (uncommitted only).
+		args = append(args, "HEAD")
+	}
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(out, "\n")
+}
+
 // nullClient is used when no git binary is available.
 type nullClient struct{}
 
@@ -317,3 +364,5 @@ func (nullClient) Branches(context.Context) []Branch                       { ret
 func (nullClient) ListTreeFiles(context.Context, string, string) []string  { return nil }
 func (nullClient) ShowFile(context.Context, string, string) ([]byte, bool) { return nil, false }
 func (nullClient) Log(context.Context, string, string, int) []Commit       { return nil }
+func (nullClient) CommitBefore(context.Context, time.Time) string          { return "" }
+func (nullClient) DiffStat(context.Context, string) string                { return "" }

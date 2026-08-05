@@ -43,6 +43,7 @@ func (s *Store) UpdateIfMatch(id, expectedHash string, mut func(*ticket.Ticket) 
 	if err := s.saveTicket(t); err != nil {
 		return nil, err
 	}
+	s.InvalidateLinksGraph()
 	return cloneTicket(t), nil
 }
 
@@ -59,6 +60,7 @@ func (s *Store) Delete(id string) error {
 	_ = os.RemoveAll(s.attachmentDir(id))
 	delete(s.cache, id)
 	delete(s.hash, id)
+	s.InvalidateLinksGraph()
 	return nil
 }
 
@@ -86,6 +88,7 @@ func (s *Store) ReloadTicket(path string) (Change, error) {
 			_, existed := s.cache[id]
 			delete(s.cache, id)
 			delete(s.hash, id)
+			s.InvalidateLinksGraph()
 			s.mu.Unlock()
 			return Change{ID: id, Removed: existed, Changed: existed}, nil
 		}
@@ -102,6 +105,7 @@ func (s *Store) ReloadTicket(path string) (Change, error) {
 	applyMtimeFallback(t, path)
 	s.cache[id] = t
 	s.hash[id] = h
+	s.InvalidateLinksGraph()
 	return Change{ID: id, Changed: true}, nil
 }
 
@@ -119,6 +123,7 @@ func (s *Store) ReloadConfig() (bool, error) {
 		return false, nil
 	}
 	s.cfg = cfg
+	s.InvalidateLinksGraph()
 	return true, nil
 }
 

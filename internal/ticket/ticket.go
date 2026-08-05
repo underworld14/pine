@@ -43,6 +43,7 @@ type Ticket struct {
 	Labels   []string  // may be empty
 	Deps     []string  // ticket IDs this ticket is blocked by
 	Parent   string    // epic ticket ID, or "" when none
+	Links    []string  // typed graph refs (ticket / LRN-* / memory/<slug> / MEMORY)
 	Created  time.Time // zero when unparseable (store fills from mtime)
 	Updated  time.Time
 	Extra    []ExtraField // unknown frontmatter keys, order-preserved

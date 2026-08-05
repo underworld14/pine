@@ -41,6 +41,8 @@ func (s *stubGit) ShowFile(_ context.Context, rev, p string) ([]byte, bool) {
 }
 
 func (s *stubGit) Log(context.Context, string, string, int) []gitx.Commit { return nil }
+func (s *stubGit) CommitBefore(context.Context, time.Time) string    { return "" }
+func (s *stubGit) DiffStat(context.Context, string) string             { return "" }
 
 func mkTicket(id, status, updated string) string {
 	return "---\nid: " + id + "\ntitle: " + id + "\nstatus: " + status + "\nupdated: " + updated + "\n---\n\nbody\n"
@@ -334,6 +336,8 @@ func (g *ghostGit) ListTreeFiles(context.Context, string, string) []string {
 }
 func (g *ghostGit) ShowFile(context.Context, string, string) ([]byte, bool) { return nil, false }
 func (g *ghostGit) Log(context.Context, string, string, int) []gitx.Commit { return nil }
+func (g *ghostGit) CommitBefore(context.Context, time.Time) string    { return "" }
+func (g *ghostGit) DiffStat(context.Context, string) string             { return "" }
 
 func TestComputeShowFileMiss(t *testing.T) {
 	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)

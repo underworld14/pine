@@ -182,6 +182,7 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	}
 	memBlock := FormatMemoryBlock(s, cwdHints, nil, 3)
 	b.WriteString(memBlock)
+	b.WriteString(FormatGraphSummaryBlock(s, 12))
 	learnings, more := SelectLearnings(s, LearningSelectOpts{CwdHints: cwdHints, Limit: 10})
 	if block := FormatLearningsBlock(learnings, more); block != "" {
 		b.WriteString(block)
@@ -189,10 +190,11 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 
 	// Conventions — the part that teaches agents to write back.
 	b.WriteString("## Conventions\n")
-	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent.\n")
+	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, links.\n")
 	fmt.Fprintf(&b, "- Move a ticket by editing its `status` (board columns: %s).\n", strings.Join(s.Board().Statuses(), ", "))
 	b.WriteString("- `deps` lists ticket IDs that block this one; a ticket is ready when every dep is `done`.\n")
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
+	b.WriteString("- `links` lists typed graph refs (ticket IDs, `LRN-*`, `memory/<topic>`, `MEMORY`); backlinks are computed.\n")
 	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
 	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (ticket one-shots: `--scope ticket`).\n")

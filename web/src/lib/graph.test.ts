@@ -40,4 +40,17 @@ describe('neighborhood', () => {
     expect(n.dependents.length).toBe(6);
     expect(n.truncated.dependents).toBe(2);
   });
+
+  it('resolves typed memory links', () => {
+    const all: Record<string, Ticket> = {
+      'BUG-1': tk({ id: 'BUG-1', links: ['memory/web', 'FEAT-2', 'MEMORY'] }),
+      'FEAT-2': tk({ id: 'FEAT-2', title: 'Feat' })
+    };
+    const n = neighborhood(all['BUG-1'], all);
+    expect(n.memory.map((m) => m.id)).toEqual(['memory/web', 'FEAT-2', 'MEMORY']);
+    expect(n.memory[0].kind).toBe('topic');
+    expect(n.memory[1].kind).toBe('ticket');
+    expect(n.memory[1].title).toBe('Feat');
+    expect(n.memory[2].kind).toBe('memory');
+  });
 });

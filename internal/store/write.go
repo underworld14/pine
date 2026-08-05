@@ -85,5 +85,6 @@ func (s *Store) SaveConfig(c *config.Config) error {
 		return err
 	}
 	s.cfg = c
+	s.InvalidateLinksGraph()
 	return nil
 }

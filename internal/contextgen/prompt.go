@@ -89,6 +89,9 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 	if mem := FormatMemoryBlock(s, nil, t.Labels, 2); mem != "" {
 		out = mem + out
 	}
+	if links := FormatTicketLinksBlock(s, t); links != "" {
+		out = links + out
+	}
 	if !tmplUsesLearnings {
 		out = appendLearningsBlock(out, selected, more)
 	}

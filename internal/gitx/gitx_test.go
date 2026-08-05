@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func gitAvailable(t *testing.T) {
@@ -326,5 +328,79 @@ func TestLogWithPathspecDefaultLimit(t *testing.T) {
 	logs = c.Log(context.Background(), "", "only", 5)
 	if len(logs) != 1 {
 		t.Fatalf("grep: %+v", logs)
+	}
+}
+
+// TestDiffStatAndCommitBefore covers the work-evidence primitives used by
+// `pine close --evidence`: CommitBefore anchors to a timestamp, DiffStat
+// summarizes tracked changes from a base to the working tree (committed +
+// unstaged-tracked; untracked files are not shown by `git diff` and are
+// surfaced separately via Snapshot.Changes).
+func TestDiffStatAndCommitBefore(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	// Use explicit committer dates so the test is deterministic without sleeps:
+	// git `--before` is inclusive at second resolution, so we space the commits
+	// across distinct seconds.
+	commitAt := func(date, msg string) {
+		t.Helper()
+		cmd := exec.Command("git", "-C", dir, "commit", "-q", "-m", msg)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+			"GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1\n"), 0o644)
+	run(t, dir, "add", "a.txt")
+	commitAt("2026-08-05T09:00:00Z", "one")
+	// Anchor time strictly between the two commits (both UTC, matching first).
+	first, _ := time.Parse(time.RFC3339, "2026-08-05T09:00:30Z")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1\n2\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("new\n"), 0o644)
+	run(t, dir, "add", "a.txt", "b.txt")
+	commitAt("2026-08-05T09:00:31Z", "two")
+
+	c := New(dir)
+	ctx := context.Background()
+	oneSHA := strings.TrimSpace(func() string {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD~1").Output()
+		if err != nil {
+			t.Fatalf("rev-parse HEAD~1: %v", err)
+		}
+		return string(out)
+	}())
+
+	// CommitBefore(first) returns the "one" commit (09:00:00 < 09:00:30 < 09:00:31).
+	base := c.CommitBefore(ctx, first)
+	if base != oneSHA {
+		t.Fatalf("CommitBefore(first) = %q, want one %q", base, oneSHA)
+	}
+
+	// DiffStat(base) includes the "two" commit's tracked changes (a.txt, b.txt).
+	stat := c.DiffStat(ctx, base)
+	if stat == "" || !strings.Contains(stat, "a.txt") || !strings.Contains(stat, "b.txt") {
+		t.Fatalf("DiffStat(base) missing tracked changes:\n%s", stat)
+	}
+
+	// DiffStat("") reports only uncommitted tracked changes (vs HEAD). Modify a
+	// tracked file without committing and expect it to appear.
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1\n2\n3\n"), 0o644)
+	uncommitted := c.DiffStat(ctx, "")
+	if !strings.Contains(uncommitted, "a.txt") {
+		t.Fatalf("DiffStat(\"\") missing uncommitted tracked change:\n%s", uncommitted)
+	}
+
+	// CommitBefore(zero) is empty (no anchor for an unknown time).
+	if c.CommitBefore(ctx, time.Time{}) != "" {
+		t.Error("CommitBefore(zero) should be empty")
+	}
+	// DiffStat on a non-repo is empty.
+	if got := New(t.TempDir()).DiffStat(ctx, ""); got != "" {
+		t.Errorf("DiffStat on non-repo = %q, want empty", got)
 	}
 }

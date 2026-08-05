@@ -322,8 +322,14 @@ func TestContextDoesNotCreateGlobalStore(t *testing.T) {
 	if _, err := run(t, repo, "context"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("pine context created the global store at %s", dir)
+	// `pine init` now writes the machine-wide repo registry at
+	// $PINE_HOME/repos.json (auto-registration for `pine serve`), so the home
+	// dir may exist. The invariant this test guards is that `pine context`
+	// must not create the global *memory* store — MEMORY.md or memory/.
+	for _, p := range []string{"MEMORY.md", "memory"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); !os.IsNotExist(err) {
+			t.Fatalf("pine context created the global memory store at %s/%s", dir, p)
+		}
 	}
 }
 

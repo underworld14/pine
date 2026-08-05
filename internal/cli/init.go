@@ -13,6 +13,7 @@ import (
 	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/setup"
 	"github.com/underworld14/pine/internal/syncignore"
+	"github.com/underworld14/pine/internal/workspace"
 )
 
 // Default template and prompt files written by pine init. The fix prompt reuses
@@ -27,6 +28,7 @@ const (
 
 func newInitCmd() *cobra.Command {
 	var (
+		alias            string
 		skipAgents        bool
 		syncTickets       = true
 		syncAttachments   = false
@@ -38,10 +40,11 @@ func newInitCmd() *cobra.Command {
 		Short: "Create a .pine workspace in this repository",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInit(cmd, skipAgents, syncPrefsFromFlags(syncTickets, noSyncTickets, syncAttachments, noSyncAttachments))
+			return runInit(cmd, skipAgents, syncPrefsFromFlags(syncTickets, noSyncTickets, syncAttachments, noSyncAttachments), alias)
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&alias, "alias", "", "display + routing alias for this repo in ~/.pine/repos.json (default: lowercase basename; a-z 0-9 - _)")
 	f.BoolVar(&skipAgents, "skip-agents", false, "skip the coding-agent setup wizard")
 	f.BoolVar(&syncTickets, "sync-tickets", true, "track .pine/tickets in git")
 	f.BoolVar(&noSyncTickets, "no-sync-tickets", false, "keep .pine/tickets local (gitignored)")
@@ -50,7 +53,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, skipAgents bool, syncSeed syncignore.Prefs) error {
+func runInit(cmd *cobra.Command, skipAgents bool, syncSeed syncignore.Prefs, alias string) error {
 	w := cmd.OutOrStdout()
 	base, err := filepath.Abs(flagDir)
 	if err != nil {
@@ -105,6 +108,19 @@ func runInit(cmd *cobra.Command, skipAgents bool, syncSeed syncignore.Prefs) err
 		fmt.Fprintln(w, "warning: not inside a git repository — git features will be disabled")
 	} else if ignored, rule := pineIgnored(root); ignored {
 		fmt.Fprintf(w, "warning: .pine appears to be gitignored (%q); Pine data is meant to be committed\n", rule)
+	}
+
+	// Register this repo in the machine-wide registry so `pine serve` and the
+	// dashboard can see it alongside other projects. Best-effort: a missing or
+	// unwritable ~/.pine must not block init. --alias overrides the default
+	// (lowercase basename) so two repos with the same basename don't collide.
+	if entry, rerr := workspace.RegisterPath(root, alias); rerr != nil {
+		fmt.Fprintf(w, "warning: could not register repo in ~/.pine/repos.json: %v\n", rerr)
+		if strings.Contains(rerr.Error(), "already registered for") {
+			fmt.Fprintf(w, "  pick a unique alias: `pine init --alias <name>` (a-z, 0-9, - or _)\n")
+		}
+	} else {
+		fmt.Fprintf(w, "Registered %s as %q in ~/.pine/repos.json (visible in `pine serve`)\n", root, entry.Alias)
 	}
 
 	// Sync prefs: interactive checklist, or non-interactive flag defaults.

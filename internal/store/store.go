@@ -18,6 +18,8 @@ import (
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/learning"
+	"github.com/underworld14/pine/internal/links"
+	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/ticket"
 )
 
@@ -55,6 +57,19 @@ type Store struct {
 
 	learningCache map[string]*learning.Learning
 	learningHash  map[string]string // learning id -> sha256 of on-disk bytes
+
+	// linksGraph is the cached unified tickets+memory+learnings graph. It is
+	// rebuilt lazily by LinksGraph() and invalidated by any ticket/learning/
+	// config/memory change (see InvalidateLinksGraph). nil means "stale, rebuild
+	// on next read".
+	linksGraph *links.Graph
+	linksMu    sync.RWMutex
+	// linksGen is bumped on every InvalidateLinksGraph. A builder snapshots the
+	// generation before building; if it changed by the time the build finishes
+	// (a writer invalidated mid-build), the built graph is discarded and the
+	// caller rebuilds — so a graph built from inputs that were just invalidated
+	// can never be cached and served stale.
+	linksGen uint64
 
 	cfg   *config.Config
 	board *config.Board
@@ -237,6 +252,62 @@ func (s *Store) Graph() *ticket.Graph {
 	return ticket.NewGraph(s.All())
 }
 
+// LinksGraph builds the unified tickets + memory + learnings graph. The result
+// is cached on the Store and invalidated by any ticket/learning/config/memory
+// change (see InvalidateLinksGraph), so repeated calls (e.g. `pine prompt`,
+// `/api/graph`) are O(1) after the first build.
+//
+// The graph is built WITHOUT holding linksMu (s.All and memory.ListTopics take
+// their own locks), then stored under linksMu. This avoids a lock-ordering
+// inversion with s.mu: write paths hold s.mu then call InvalidateLinksGraph
+// (linksMu only), so the order is always s.mu → linksMu, never the reverse.
+//
+// A generation counter guards against a narrow staleness race: a reader
+// snapshots inputs, a writer mutates + invalidates (bumping linksGen) before
+// the reader stores its now-stale graph. The reader re-checks linksGen under
+// the lock and discards its graph if the generation changed, so a stale
+// graph is never cached — the next caller rebuilds.
+func (s *Store) LinksGraph() *links.Graph {
+	s.linksMu.RLock()
+	g, gen := s.linksGraph, s.linksGen
+	s.linksMu.RUnlock()
+	if g != nil {
+		return g
+	}
+	topics, _ := memory.ListTopics(s.root)
+	mem, err := memory.ReadMEMORY(s.root)
+	hasMEMORY := err == nil && strings.TrimSpace(mem) != ""
+	g = links.Build(s.All(), topics, s.AllLearnings(), hasMEMORY)
+	s.linksMu.Lock()
+	switch {
+	case s.linksGen != gen:
+		// Invalidated while we were building; don't cache a stale graph.
+		g = nil
+	case s.linksGraph != nil:
+		// Lost a race; another builder already cached a fresh graph.
+		g = s.linksGraph
+	default:
+		s.linksGraph = g
+	}
+	s.linksMu.Unlock()
+	if g == nil {
+		return s.LinksGraph() // rebuild with fresh inputs
+	}
+	return g
+}
+
+// InvalidateLinksGraph drops the cached unified graph and bumps the
+// generation so any in-flight LinksGraph builder discards its result. Callers
+// are the write path (Create/Update/Delete/SaveConfig) and the watcher
+// (ReloadTicket/ReloadLearning/ReloadConfig + memory edits), so the next
+// LinksGraph() rebuilds from the fresh on-disk state.
+func (s *Store) InvalidateLinksGraph() {
+	s.linksMu.Lock()
+	s.linksGraph = nil
+	s.linksGen++
+	s.linksMu.Unlock()
+}
+
 // Get returns a copy of a ticket by ID.
 func (s *Store) Get(id string) (*ticket.Ticket, error) {
 	s.mu.RLock()
@@ -279,6 +350,7 @@ func cloneTicket(t *ticket.Ticket) *ticket.Ticket {
 	c := *t
 	c.Labels = append([]string(nil), t.Labels...)
 	c.Deps = append([]string(nil), t.Deps...)
+	c.Links = append([]string(nil), t.Links...)
 	c.Extra = append([]ticket.ExtraField(nil), t.Extra...)
 	c.Warnings = append([]string(nil), t.Warnings...)
 	return &c

@@ -126,5 +126,20 @@ func (srv *Server) emit(event string, origin, payload map[string]any) {
 	for k, v := range payload {
 		data[k] = v
 	}
+	if srv.registry != nil {
+		data["repo"] = srv.registry.ActiveAlias()
+	}
+	srv.hub.broadcast(event, data)
+}
+
+// emitRepo broadcasts an event tagged with a specific repo alias.
+func (srv *Server) emitRepo(alias, event string, origin, payload map[string]any) {
+	if srv.hub == nil {
+		return
+	}
+	data := map[string]any{"origin": origin, "repo": alias}
+	for k, v := range payload {
+		data[k] = v
+	}
 	srv.hub.broadcast(event, data)
 }

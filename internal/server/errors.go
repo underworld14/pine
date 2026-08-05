@@ -19,6 +19,9 @@ type httpError struct {
 func (e httpError) Error() string { return e.msg }
 
 func badRequest(msg string) error { return httpError{http.StatusBadRequest, "bad_request", msg} }
+func notFound(msg string) error {
+	return httpError{http.StatusNotFound, "not_found", msg}
+}
 func unprocessable(msg string) error {
 	return httpError{http.StatusUnprocessableEntity, "validation_failed", msg}
 }

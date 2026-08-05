@@ -3,7 +3,7 @@
 // from each ticket's frontmatter status (self-healing), so an agent editing a
 // file makes the card move without any board.json change.
 
-import { api, PineEventSource, type Board, type Config, type GitStatus, type PineEvent, type Ticket } from './api';
+import { api, PineEventSource, type Board, type Config, type GitStatus, type PineEvent, type RepoInfo, type Ticket } from './api';
 import { sortByEffective } from './board-order';
 
 type Conn = 'connecting' | 'live' | 'down';
@@ -29,9 +29,19 @@ class WorkspaceStore {
   board = $state<Board | null>(null);
   config = $state<Config | null>(null);
   git = $state<GitStatus | null>(null);
+  // Per-repo git cache: every registered repo's poller emits a repo-tagged
+  // git.updated, so we keep the latest snapshot per repo and only promote it to
+  // `git` for the active repo. Switching repos is then instant (no git flash).
+  gitByRepo = $state<Record<string, GitStatus>>({});
   connection = $state<Conn>('connecting');
   hydrated = $state(false);
   error = $state<string | null>(null);
+
+  // Multi-repo: populated from /api/repos. When more than one repo is registered
+  // in ~/.pine/repos.json (auto-populated by `pine init`), the dashboard renders
+  // a repo switcher and SSE events are filtered by the active repo.
+  repos = $state<RepoInfo[]>([]);
+  activeRepo = $state<string>('default');
 
   // Ticket ids that recently changed from disk — drives the flash animation.
   flashing = $state<Record<string, number>>({});
@@ -40,6 +50,7 @@ class WorkspaceStore {
   private sse: PineEventSource | null = null;
 
   list = $derived(Object.values(this.tickets));
+  isMultiRepo = $derived(this.repos.length > 1);
 
   columns = $derived.by<ColumnView[]>(() => {
     const b = this.board;
@@ -85,19 +96,40 @@ class WorkspaceStore {
 
   async hydrate() {
     try {
-      const snap = await api.snapshot();
+      const [snap, repos] = await Promise.all([
+        api.snapshot(),
+        api.repos().catch(() => null)
+      ]);
       const map: Record<string, Ticket> = {};
       for (const t of snap.tickets) map[t.id] = t;
       this.tickets = map;
       this.board = snap.board;
       this.config = snap.config;
       this.git = snap.git;
+      if (repos) {
+        this.repos = repos.repos ?? [];
+        this.activeRepo = repos.active ?? 'default';
+      }
+      // Seed the active repo's git cache from the snapshot so the first switch
+      // away and back is instant; per-repo pollers fill in the rest over SSE.
+      this.gitByRepo = { ...this.gitByRepo, [this.activeRepo]: snap.git };
       this.hydrated = true;
       this.error = null;
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'failed to load';
       throw e;
     }
+  }
+
+  async switchRepo(alias: string) {
+    if (alias === this.activeRepo) return;
+    await api.activateRepo(alias);
+    this.activeRepo = alias;
+    // Promote the cached git snapshot (if its poller has reported one) so the
+    // header updates instantly; hydrate() refreshes it from the snapshot next.
+    const cached = this.gitByRepo[alias];
+    if (cached) this.git = cached;
+    await this.hydrate();
   }
 
   startLive() {
@@ -134,6 +166,16 @@ class WorkspaceStore {
   }
 
   applyEvent(ev: PineEvent) {
+    // Cache every repo's git snapshot before the per-repo filter below drops
+    // non-active events: the active repo's git.updated promotes to `git`, while
+    // other repos' updates are retained in gitByRepo so a later switch is live.
+    if (ev.type === 'git.updated' && ev.git) {
+      this.gitByRepo = { ...this.gitByRepo, [ev.repo ?? this.activeRepo]: ev.git };
+    }
+    // Ignore events for other repos when serving a multi-repo workspace.
+    if (this.isMultiRepo && ev.repo && ev.repo !== this.activeRepo) {
+      return;
+    }
     const external = ev.origin?.source === 'fs' || !this.recentOps.has(ev.origin?.opId ?? '');
     switch (ev.type) {
       case 'ticket.created':

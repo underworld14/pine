@@ -77,6 +77,90 @@ func TestAppendTopicCreatesAndAppends(t *testing.T) {
 	}
 }
 
+// TestSetTopicLinks covers SetTopicLinks on a missing topic (stub creation), on
+// an existing topic (frontmatter rewrite), and clearing links (empty slice).
+func TestSetTopicLinks(t *testing.T) {
+	dir := t.TempDir()
+	pine := filepath.Join(dir, ".pine")
+	_ = os.MkdirAll(pine, 0o755)
+
+	// Missing topic → created with a stub body and the links frontmatter.
+	if err := SetTopicLinks(pine, "git-habits", []string{"MEMORY", "FEAT-001"}); err != nil {
+		t.Fatal(err)
+	}
+	tp, err := ReadTopic(pine, "git-habits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tp.Links) != 2 || tp.Links[0] != "MEMORY" || tp.Links[1] != "FEAT-001" {
+		t.Fatalf("links=%v", tp.Links)
+	}
+
+	// Existing topic with prior frontmatter → links replace, body preserved.
+	if err := AppendTopic(pine, "git-habits", AppendOpts{Text: "first note"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetTopicLinks(pine, "git-habits", []string{"memory/deps"}); err != nil {
+		t.Fatal(err)
+	}
+	tp, err = ReadTopic(pine, "git-habits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tp.Links) != 1 || tp.Links[0] != "memory/deps" {
+		t.Fatalf("links after replace=%v", tp.Links)
+	}
+	if !strings.Contains(tp.Body, "first note") {
+		t.Fatalf("body not preserved:\n%s", tp.Body)
+	}
+
+	// Empty links slice → links key removed entirely.
+	if err := SetTopicLinks(pine, "git-habits", nil); err != nil {
+		t.Fatal(err)
+	}
+	tp, err = ReadTopic(pine, "git-habits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tp.Links) != 0 {
+		t.Fatalf("links should be empty after clear, got %v", tp.Links)
+	}
+}
+
+// TestDecodeLinksAny covers all decodeLinksAny branches (nil, []string, []any,
+// string, default) including whitespace/empty filtering.
+func TestDecodeLinksAny(t *testing.T) {
+	cases := []struct {
+		in   any
+		want []string
+	}{
+		{nil, []string(nil)},
+		{[]string{"a", "  ", "", "b"}, []string{"a", "b"}},
+		{[]any{"x", "", "  ", "<nil>", "y"}, []string{"x", "y"}},
+		{"  single  ", []string{"single"}},
+		{"", []string(nil)},
+		{42, []string(nil)}, // default branch
+	}
+	for _, c := range cases {
+		got := decodeLinksAny(c.in)
+		if !sliceEq(got, c.want) {
+			t.Errorf("decodeLinksAny(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func sliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestSuggestPrefersCiteTopic(t *testing.T) {
 	dir := t.TempDir()
 	pine := filepath.Join(dir, ".pine")

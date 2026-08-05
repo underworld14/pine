@@ -28,6 +28,7 @@ export interface Ticket {
   labels: string[];
   deps: string[];
   parent?: string;
+  links?: string[];
   created: string;
   updated: string;
   blocked: boolean;
@@ -98,6 +99,41 @@ export interface SearchHit {
   fragments?: Record<string, string[]>;
 }
 
+export type GraphNodeKind = 'ticket' | 'learning' | 'topic' | 'memory' | 'unknown';
+export type GraphEdgeKind = 'dep' | 'parent' | 'link';
+
+export interface GraphNode {
+  id: string;
+  kind: GraphNodeKind;
+  title: string;
+  status?: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  kind: GraphEdgeKind;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  backlinks?: Record<string, string[]>;
+  dangling?: string[];
+}
+
+export interface RepoInfo {
+  alias: string;
+  project: string;
+  repo: string;
+  pine?: string;
+}
+
+export interface ReposResponse {
+  active: string;
+  repos: RepoInfo[];
+}
+
 export interface AttachmentResult extends Attachment {
   path: string;
   markdown: string;
@@ -113,6 +149,7 @@ export interface PineEvent {
   type: string;
   seq: number;
   origin: { source: 'api' | 'fs'; opId?: string };
+  repo?: string;
   ticket?: Ticket;
   tickets?: Ticket[]; // crossbranch.updated carries the full off-branch set
   id?: string;
@@ -172,6 +209,9 @@ export const api = {
     ),
   ticketPrompt: async (id: string) => (await fetch(`/api/tickets/${id}/prompt`)).text(),
   context: async () => (await fetch('/api/context')).text(),
+  graph: () => req<GraphData>('GET', '/api/graph'),
+  repos: () => req<ReposResponse>('GET', '/api/repos'),
+  activateRepo: (alias: string) => req<ReposResponse>('POST', `/api/repos/${encodeURIComponent(alias)}/activate`),
   async upload(id: string, files: File[], opts: { opId?: string; onProgress?: (p: number) => void } = {}): Promise<AttachmentResult[]> {
     const form = new FormData();
     for (const f of files) form.append('files', f, f.name);

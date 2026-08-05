@@ -15,6 +15,7 @@ import (
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/learning"
+	"github.com/underworld14/pine/internal/links"
 	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/store"
 	"github.com/underworld14/pine/internal/syncignore"
@@ -111,6 +112,7 @@ func Run(s *store.Store) *Report {
 	for _, t := range all {
 		byID[t.ID] = t
 	}
+	linkCat := buildLinkCatalog(s, byID)
 
 	for _, t := range all {
 		if t.Degraded {
@@ -158,8 +160,23 @@ func Run(s *store.Store) *Report {
 				r.warnFix("parent-not-epic", t.ID+": parent "+t.Parent+" is not an epic", clearParent)
 			}
 		}
+		for _, raw := range t.Links {
+			raw := raw
+			ref := links.Resolve(raw, linkCat)
+			if !ref.Exists {
+				r.warnFix("dangling-link", t.ID+": dangling link "+raw, func(s *store.Store) error {
+					_, err := s.Update(id, func(tt *ticket.Ticket) error {
+						tt.Links = removeString(tt.Links, raw)
+						return nil
+					})
+					return err
+				})
+			}
+		}
 		checkAttachmentRefs(r, s, t)
 	}
+
+	checkTopicLinks(r, s, linkCat)
 
 	for _, cyc := range s.Graph().Cycles() {
 		r.err("dependency cycle among: " + strings.Join(cyc, ", "))
@@ -451,4 +468,47 @@ func nestedIgnoresTickets(body string) bool {
 		}
 	}
 	return false
+}
+
+func buildLinkCatalog(s *store.Store, byID map[string]*ticket.Ticket) links.Catalog {
+	cat := links.Catalog{
+		Tickets:   byID,
+		Learnings: map[string]*learning.Learning{},
+		Topics:    map[string]memory.Topic{},
+	}
+	for _, l := range s.AllLearnings() {
+		cat.Learnings[l.ID] = l
+	}
+	topics, _ := memory.ListTopics(s.Root())
+	for _, t := range topics {
+		cat.Topics[t.Slug] = t
+	}
+	if mem, err := memory.ReadMEMORY(s.Root()); err == nil && strings.TrimSpace(mem) != "" {
+		cat.HasMEMORY = true
+	}
+	return cat
+}
+
+func checkTopicLinks(r *Report, s *store.Store, cat links.Catalog) {
+	topics, err := memory.ListTopics(s.Root())
+	if err != nil {
+		return
+	}
+	for _, topic := range topics {
+		slug := topic.Slug
+		for _, raw := range topic.Links {
+			raw := raw
+			ref := links.Resolve(raw, cat)
+			if ref.Exists {
+				continue
+			}
+			r.warnFix("dangling-topic-link", "memory/"+slug+": dangling link "+raw, func(st *store.Store) error {
+				t, err := memory.ReadTopic(st.Root(), slug)
+				if err != nil {
+					return err
+				}
+				return memory.SetTopicLinks(st.Root(), slug, removeString(t.Links, raw))
+			})
+		}
+	}
 }

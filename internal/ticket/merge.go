@@ -41,6 +41,7 @@ func Merge3(base, ours, theirs *Ticket) (*Ticket, bool) {
 
 	m.Labels = mergeSet(b.Labels, ours.Labels, theirs.Labels)
 	m.Deps = mergeSet(b.Deps, ours.Deps, theirs.Deps)
+	m.Links = mergeSet(b.Links, ours.Links, theirs.Links)
 
 	m.Created = earliest(base, ours.Created, theirs.Created)
 	m.Updated = latest(ours.Updated, theirs.Updated)

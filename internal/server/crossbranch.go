@@ -24,8 +24,14 @@ func (srv *Server) initCrossBranch() {
 	// Git is anchored at the parent of .pine, so the tickets dir relative to that
 	// anchor is "<pineDirName>/tickets" (".pine/tickets" for the standard layout).
 	// Forward slashes: git pathspecs use them on every platform.
-	srv.ticketsRel = path.Join(filepath.Base(srv.store.Root()), "tickets")
-	srv.crossKick = make(chan struct{}, 1)
+	ticketsRel := path.Join(filepath.Base(srv.activeStore().Root()), "tickets")
+
+	srv.crossMu.Lock()
+	srv.ticketsRel = ticketsRel
+	if srv.crossKick == nil {
+		srv.crossKick = make(chan struct{}, 1)
+	}
+	srv.crossMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), crossTimeout)
 	defer cancel()
@@ -36,19 +42,26 @@ func (srv *Server) initCrossBranch() {
 // cache. It returns whether the overlay changed. The feature is gated here (not
 // just in config) so a sequential-ID repo never aggregates even if enabled.
 func (srv *Server) refreshCrossBranch(ctx context.Context) (changed bool) {
-	cfg := srv.store.Config()
+	st := srv.activeStore()
+	cfg := st.Config()
+
+	// Snapshot the request-scoped fields under the lock so a concurrent
+	// SetActiveRepo can't race the read.
+	srv.crossMu.RLock()
+	ticketsRel := srv.ticketsRel
+	srv.crossMu.RUnlock()
 
 	var offs []crossbranch.Off
 	if cfg.CrossBranch.Enabled && cfg.IDStyle == "hash" {
 		localIDs := map[string]bool{}
-		for _, t := range srv.store.All() {
+		for _, t := range st.All() {
 			localIDs[t.ID] = true
 		}
-		offs = crossbranch.Compute(ctx, srv.git, srv.gitSnapshot().Branch, localIDs, crossbranch.Options{
+		offs = crossbranch.Compute(ctx, srv.gitClient(), srv.gitSnapshot().Branch, localIDs, crossbranch.Options{
 			Enabled:     true,
-			IDStyle:     cfg.IDStyle,
-			ActiveDays:  cfg.CrossBranch.ActiveBranchDays,
-			TicketsPath: srv.ticketsRel,
+			IDStyle:      cfg.IDStyle,
+			ActiveDays:   cfg.CrossBranch.ActiveBranchDays,
+			TicketsPath:  ticketsRel,
 		})
 	}
 
@@ -74,6 +87,11 @@ func (srv *Server) refreshCrossBranch(ctx context.Context) (changed bool) {
 // demand via crossKick (config toggle, local create/delete). It broadcasts
 // crossbranch.updated only when the overlay actually changes.
 func (srv *Server) startCrossBranchPoller(done chan struct{}) {
+	// crossKick is created once (initCrossBranch only makes it if nil), so
+	// snapshotting it here is safe even across SetActiveRepo swaps.
+	srv.crossMu.RLock()
+	kick := srv.crossKick
+	srv.crossMu.RUnlock()
 	go func() {
 		ticker := time.NewTicker(crossPollEvery)
 		defer ticker.Stop()
@@ -82,7 +100,7 @@ func (srv *Server) startCrossBranchPoller(done chan struct{}) {
 			case <-done:
 				return
 			case <-ticker.C:
-			case <-srv.crossKick:
+			case <-kick:
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), crossTimeout)
 			changed := srv.refreshCrossBranch(ctx)
@@ -96,11 +114,14 @@ func (srv *Server) startCrossBranchPoller(done chan struct{}) {
 
 // kickCrossBranch nudges the poller to refresh soon (non-blocking).
 func (srv *Server) kickCrossBranch() {
-	if srv.crossKick == nil {
+	srv.crossMu.RLock()
+	kick := srv.crossKick
+	srv.crossMu.RUnlock()
+	if kick == nil {
 		return
 	}
 	select {
-	case srv.crossKick <- struct{}{}:
+	case kick <- struct{}{}:
 	default:
 	}
 }

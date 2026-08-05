@@ -33,12 +33,15 @@ type attachResult struct {
 }
 
 func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Request) {
+	st := srv.storeOf(r)
 	id := chi.URLParam(r, "id")
-	if branch, ok := srv.offBranchRef(id); ok {
-		writeErr(w, readOnlyBranch(id, branch))
-		return
+	if srv.isActiveStore(st) {
+		if branch, ok := srv.offBranchRef(id); ok {
+			writeErr(w, readOnlyBranch(id, branch))
+			return
+		}
 	}
-	if _, err := srv.store.Get(id); err != nil {
+	if _, err := st.Get(id); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -55,9 +58,9 @@ func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cfg := attach.FromConfig(srv.store.Config().Attachments)
+	cfg := attach.FromConfig(st.Config().Attachments)
 	existing := map[string]bool{}
-	for _, a := range srv.store.Attachments(id) {
+	for _, a := range st.Attachments(id) {
 		existing[a.Name] = true
 	}
 
@@ -84,7 +87,7 @@ func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Reques
 		}
 		dedup := existing[p.FileName]
 		if !dedup {
-			if _, err := srv.store.WriteAttachment(id, p.FileName, p.Data); err != nil {
+			if _, err := st.WriteAttachment(id, p.FileName, p.Data); err != nil {
 				results = append(results, attachResult{Name: p.FileName, Error: err.Error()})
 				continue
 			}
@@ -98,9 +101,9 @@ func (srv *Server) handleUploadAttachments(w http.ResponseWriter, r *http.Reques
 	}
 
 	if anyOK {
-		if t, err := srv.store.Get(id); err == nil {
-			srv.emit("ticket.updated", apiOrigin(r.URL.Query().Get("opId")), map[string]any{
-				"ticket": view.Build(srv.store, srv.store.Graph(), t, true),
+		if t, err := st.Get(id); err == nil {
+			srv.emitRepo(srv.registry.AliasOf(st), "ticket.updated", apiOrigin(r.URL.Query().Get("opId")), map[string]any{
+				"ticket": view.Build(st, st.Graph(), t, true),
 			})
 		}
 	}
@@ -132,30 +135,35 @@ func buildAttachResult(id string, p attach.Processed, dedup bool) attachResult {
 }
 
 func (srv *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	st := srv.storeOf(r)
 	id := chi.URLParam(r, "id")
 	name := chi.URLParam(r, "name")
-	if branch, ok := srv.offBranchRef(id); ok {
-		writeErr(w, readOnlyBranch(id, branch))
-		return
+	if srv.isActiveStore(st) {
+		if branch, ok := srv.offBranchRef(id); ok {
+			writeErr(w, readOnlyBranch(id, branch))
+			return
+		}
 	}
-	if err := srv.store.DeleteAttachment(id, name); err != nil {
+	if err := st.DeleteAttachment(id, name); err != nil {
 		writeErr(w, badRequest(err.Error()))
 		return
 	}
-	if t, err := srv.store.Get(id); err == nil {
-		srv.emit("ticket.updated", apiOrigin(r.URL.Query().Get("opId")), map[string]any{
-			"ticket": view.Build(srv.store, srv.store.Graph(), t, true),
+	if t, err := st.Get(id); err == nil {
+		srv.emitRepo(srv.registry.AliasOf(st), "ticket.updated", apiOrigin(r.URL.Query().Get("opId")), map[string]any{
+			"ticket": view.Build(st, st.Graph(), t, true),
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleServeAttachment serves an attachment file. The ticket id and filename are
-// validated and confined to the attachments directory by the store.
+// validated and confined to the attachments directory by the store. Resolves the
+// store from the request so /api/r/{alias}/attachments/... serves the alias
+// repo's files; the legacy /attachments/... route serves the active store.
 func (srv *Server) handleServeAttachment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	name := chi.URLParam(r, "name")
-	path, err := srv.store.AttachmentFilePath(id, name)
+	path, err := srv.storeOf(r).AttachmentFilePath(id, name)
 	if err != nil {
 		http.NotFound(w, r)
 		return

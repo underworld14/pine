@@ -124,6 +124,7 @@ func (s *Store) CreateLearning(req CreateLearningReq) (*learning.Learning, error
 		_ = os.Remove(s.learningPath(id))
 		return nil, err
 	}
+	s.InvalidateLinksGraph()
 	return cloneLearning(l), nil
 }
 
@@ -193,6 +194,7 @@ func (s *Store) ReloadLearning(path string) (Change, error) {
 			_, existed := s.learningCache[id]
 			delete(s.learningCache, id)
 			delete(s.learningHash, id)
+			s.InvalidateLinksGraph()
 			s.mu.Unlock()
 			return Change{ID: id, Removed: existed, Changed: existed}, nil
 		}
@@ -209,6 +211,7 @@ func (s *Store) ReloadLearning(path string) (Change, error) {
 	applyLearningMtimeFallback(l, path)
 	s.learningCache[id] = l
 	s.learningHash[id] = h
+	s.InvalidateLinksGraph()
 	return Change{ID: id, Changed: true}, nil
 }
 
@@ -362,6 +365,7 @@ func (s *Store) UpdateLearning(id string, mut func(*learning.Learning) error) (*
 	if err := s.saveLearning(l); err != nil {
 		return nil, err
 	}
+	s.InvalidateLinksGraph()
 	return cloneLearning(l), nil
 }
 
@@ -378,6 +382,7 @@ func (s *Store) DeleteLearning(id string) error {
 	}
 	delete(s.learningCache, id)
 	delete(s.learningHash, id)
+	s.InvalidateLinksGraph()
 	return nil
 }
 

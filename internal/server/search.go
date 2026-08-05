@@ -18,13 +18,23 @@ func (srv *Server) initSearch() {
 	if err != nil {
 		return
 	}
+	srv.searchMu.Lock()
 	srv.search = idx
-	all := srv.store.All()
+	srv.searchMu.Unlock()
+	all := srv.activeStore().All()
 	docs := make([]search.Doc, 0, len(all))
 	for _, t := range all {
 		docs = append(docs, docFromTicket(t))
 	}
 	idx.BuildAsync(docs)
+}
+
+// searchIdx returns the current search index under the lock, so SetActiveRepo
+// (which swaps srv.search) can't race with request handlers / watchers.
+func (srv *Server) searchIdx() *searchIndex {
+	srv.searchMu.RLock()
+	defer srv.searchMu.RUnlock()
+	return srv.search
 }
 
 func docFromTicket(t *ticket.Ticket) search.Doc {
@@ -42,17 +52,18 @@ func docFromTicket(t *ticket.Ticket) search.Doc {
 }
 
 func (srv *Server) reindex(id string) {
-	if srv.search == nil {
+	idx := srv.searchIdx()
+	if idx == nil {
 		return
 	}
-	if t, err := srv.store.Get(id); err == nil {
-		srv.search.Upsert(docFromTicket(t))
+	if t, err := srv.activeStore().Get(id); err == nil {
+		idx.Upsert(docFromTicket(t))
 	}
 }
 
 func (srv *Server) deindex(id string) {
-	if srv.search != nil {
-		srv.search.Delete(id)
+	if idx := srv.searchIdx(); idx != nil {
+		idx.Delete(id)
 	}
 }
 
@@ -67,16 +78,25 @@ type searchHit struct {
 }
 
 func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	st := srv.storeOf(r)
 	q := r.URL.Query()
 	resp := map[string]any{"indexing": true, "hits": []searchHit{}}
-	if srv.search == nil {
+	// The search index is maintained for the active store only. Alias routes to
+	// non-active repos return empty results (indexing: true) rather than
+	// returning the active repo's tickets — see C1 in the multi-repo review.
+	if !srv.isActiveStore(st) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	resp["indexing"] = !srv.search.Ready()
+	idx := srv.searchIdx()
+	if idx == nil {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp["indexing"] = !idx.Ready()
 
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	hits := srv.search.Search(q.Get("q"), search.Filter{
+	hits := idx.Search(q.Get("q"), search.Filter{
 		Kind:     search.KindTicket,
 		Status:   q.Get("status"),
 		Type:     q.Get("type"),
@@ -86,7 +106,7 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
 		sh := searchHit{ID: h.ID, Score: h.Score, Fragments: h.Fragments}
-		if t, err := srv.store.Get(h.ID); err == nil {
+		if t, err := st.Get(h.ID); err == nil {
 			sh.Title = t.Title
 			sh.Status = t.Status
 			sh.Type = t.Prefix()
