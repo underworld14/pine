@@ -17,3 +17,7 @@ node_modules/
 
 # Test scratch
 /tmp-*
+.playwright-mcp/
+
+# Local agent overrides (machine-specific permissions)
+.claude/settings.local.json

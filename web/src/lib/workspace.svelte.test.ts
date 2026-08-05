@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { flushSync } from 'svelte';
 import { workspace } from './workspace.svelte';
-import type { Ticket } from './api';
+import { api, type Ticket } from './api';
 
 function mk(id: string, status: string, extra: Partial<Ticket> = {}): Ticket {
   return {
@@ -51,6 +51,49 @@ describe('workspace columns', () => {
       const todo = workspace.columns[0];
       expect(todo.tickets[0].id).toBe('b'); // critical outranks low
     });
+  });
+
+  it('honors a persisted manual order over the default sort', () => {
+    withEffects(() => {
+      workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+      // a is low priority but manually placed at the top; b is critical (floats).
+      workspace.tickets = {
+        a: mk('a', 'todo', { priority: 'low', order: 10 }),
+        b: mk('b', 'todo', { priority: 'critical' })
+      };
+      flushSync();
+      expect(workspace.columns[0].tickets.map((t) => t.id)).toEqual(['a', 'b']);
+    });
+  });
+});
+
+describe('reorder', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('optimistically applies order + status then reconciles from the server', async () => {
+    workspace.tickets = { a: mk('a', 'todo', { hash: 'h1' }) };
+    const spy = vi.spyOn(api, 'patchTicket').mockResolvedValue(
+      mk('a', 'doing', { order: 150, hash: 'h2' })
+    );
+    await workspace.reorder('a', { status: 'doing', order: 150 });
+    expect(spy).toHaveBeenCalledWith('a', expect.objectContaining({ status: 'doing', order: 150 }), 'h1');
+    expect(workspace.tickets['a'].order).toBe(150);
+    expect(workspace.tickets['a'].hash).toBe('h2');
+  });
+
+  it('reverts on failure when no external update landed', async () => {
+    workspace.tickets = { a: mk('a', 'todo', { order: 0, hash: 'h1' }) };
+    vi.spyOn(api, 'patchTicket').mockRejectedValue(new Error('boom'));
+    await expect(workspace.reorder('a', { order: 500 })).rejects.toThrow('boom');
+    expect(workspace.tickets['a'].order ?? 0).toBe(0); // rolled back
+    expect(workspace.tickets['a'].status).toBe('todo');
+  });
+
+  it('is a no-op for a read-only (off-branch) card', async () => {
+    workspace.tickets = { a: mk('a', 'todo', { readOnly: true }) };
+    const spy = vi.spyOn(api, 'patchTicket');
+    await workspace.reorder('a', { order: 500 });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

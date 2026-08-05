@@ -22,6 +22,9 @@ export interface Ticket {
   title: string;
   status: string;
   priority: Priority | string;
+  // Manual board sort key persisted in frontmatter; absent/0 means the card
+  // falls back to the default priority/recency sort. See lib/board-order.
+  order?: number;
   labels: string[];
   deps: string[];
   parent?: string;

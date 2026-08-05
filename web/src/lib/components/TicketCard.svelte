@@ -4,48 +4,69 @@
   import { priorityMeta, labelColor, shortBranch } from '$lib/ui-helpers';
   import { relTime } from '$lib/format';
 
-  let { ticket }: { ticket: Ticket } = $props();
+  let { ticket, onPeek }: { ticket: Ticket; onPeek?: (t: Ticket, anchor: DOMRect) => void } = $props();
   const pm = $derived(priorityMeta(ticket.priority));
   const flash = $derived(workspace.flashing[ticket.id] ?? 0);
   const offBranch = $derived(!!ticket.readOnly);
+
+  function peek(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    onPeek?.(ticket, (e.currentTarget as HTMLElement).getBoundingClientRect());
+  }
 </script>
 
-<a
-  href={`/tickets/${ticket.id}`}
-  class="card"
-  class:flash={flash > 0}
-  class:readonly={offBranch}
-  data-flash={flash}
->
-  <div class="row">
-    <span class="prio" style="color: {pm.color}" title={pm.label}>{pm.glyph}</span>
-    <span class="mono id">{ticket.id}</span>
-    {#if ticket.blocked}
-      <span class="lock" title="Blocked by {ticket.unmet?.length ?? ''} unmet dependencies">🔒</span>
-    {/if}
-    <span class="spacer"></span>
-    {#if offBranch && ticket.branch}
-      <span class="branch" title="Read-only — lives on branch {ticket.branch}">⑂ {shortBranch(ticket.branch)}</span>
-    {/if}
-    {#each ticket.labels.slice(0, 2) as l}
-      <span class="chip" style="--c: {labelColor(l)}">{l}</span>
-    {/each}
-    {#if ticket.labels.length > 2}<span class="more">+{ticket.labels.length - 2}</span>{/if}
-  </div>
-  <div class="title">{ticket.title}</div>
-  <div class="foot">
-    {#if ticket.attachments?.length}<span>📎 {ticket.attachments.length}</span>{/if}
-    {#if ticket.parent}<span class="mono parent">{ticket.parent}</span>{/if}
-    {#if ticket.acceptance?.total}
-      <span class="ac" title="Acceptance criteria">
-        {#each Array(ticket.acceptance.total) as _, i}<span class="tick" class:on={i < ticket.acceptance.done}></span>{/each}
-        {ticket.acceptance.done}/{ticket.acceptance.total}
-      </span>
-    {/if}
-    <span class="spacer"></span>
-    <span class="time">{relTime(ticket.updated)}</span>
-  </div>
-</a>
+<div class="group relative">
+  <a
+    href={`/tickets/${ticket.id}`}
+    class="card"
+    class:flash={flash > 0}
+    class:readonly={offBranch}
+    data-flash={flash}
+  >
+    <div class="row">
+      <span class="prio" style="color: {pm.color}" title={pm.label}>{pm.glyph}</span>
+      <span class="mono id">{ticket.id}</span>
+      {#if ticket.blocked}
+        <span class="lock" title="Blocked by {ticket.unmet?.length ?? ''} unmet dependencies">🔒</span>
+      {/if}
+      <span class="spacer"></span>
+      {#if offBranch && ticket.branch}
+        <span class="branch" title="Read-only — lives on branch {ticket.branch}">⑂ {shortBranch(ticket.branch)}</span>
+      {/if}
+      {#each ticket.labels.slice(0, 2) as l}
+        <span class="chip" style="--c: {labelColor(l)}">{l}</span>
+      {/each}
+      {#if ticket.labels.length > 2}<span class="more">+{ticket.labels.length - 2}</span>{/if}
+    </div>
+    <div class="title">{ticket.title}</div>
+    <div class="foot">
+      {#if ticket.attachments?.length}<span>📎 {ticket.attachments.length}</span>{/if}
+      {#if ticket.parent}<span class="mono parent">{ticket.parent}</span>{/if}
+      {#if ticket.acceptance?.total}
+        <span class="ac" title="Acceptance criteria">
+          {#each Array(ticket.acceptance.total) as _, i}<span class="tick" class:on={i < ticket.acceptance.done}></span>{/each}
+          {ticket.acceptance.done}/{ticket.acceptance.total}
+        </span>
+      {/if}
+      <span class="spacer"></span>
+      <span class="time">{relTime(ticket.updated)}</span>
+    </div>
+  </a>
+
+  {#if !offBranch && onPeek}
+    <button
+      type="button"
+      data-testid={`peek-${ticket.id}`}
+      onclick={peek}
+      title="Quick edit"
+      aria-label={`Quick edit ${ticket.id}`}
+      class="peek-btn absolute right-1.5 top-1.5 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] leading-none text-dim opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto focus-visible:pointer-events-auto"
+    >
+      ✎
+    </button>
+  {/if}
+</div>
 
 <style>
   .card {
@@ -56,12 +77,18 @@
     padding: 8px 10px;
     text-decoration: none;
     color: inherit;
-    transition: border-color 0.14s, transform 0.14s;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
+    transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
   }
-  .card:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border)); }
+  /* Subtle Trello-like lift on hover. */
+  .card:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.22);
+  }
   /* Off-branch (read-only) cards read as non-editable: dimmed with a dashed edge. */
-  .card.readonly { border-style: dashed; opacity: 0.72; }
-  .card.readonly:hover { opacity: 0.9; }
+  .card.readonly { border-style: dashed; opacity: 0.72; box-shadow: none; }
+  .card.readonly:hover { opacity: 0.9; transform: none; box-shadow: none; }
   .branch {
     font-size: 10px; padding: 1px 6px; border-radius: 999px; white-space: nowrap;
     background: color-mix(in srgb, var(--color-dim) 18%, transparent);
@@ -78,7 +105,7 @@
     color: var(--c); white-space: nowrap;
   }
   .more { font-size: 10px; color: var(--color-dim); }
-  .title { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .title { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--color-dim); }
   .ac { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--color-dim); }
   .ac .tick { width: 5px; height: 5px; border-radius: 1px; background: var(--color-border); }

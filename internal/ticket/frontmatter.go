@@ -1,6 +1,8 @@
 package ticket
 
 import (
+	"math"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,7 +13,7 @@ import (
 // knownKeys are the frontmatter keys Pine maps onto struct fields. Everything
 // else is preserved verbatim in Ticket.Extra.
 var knownKeys = map[string]bool{
-	"id": true, "title": true, "status": true, "priority": true,
+	"id": true, "title": true, "status": true, "priority": true, "order": true,
 	"labels": true, "deps": true, "parent": true, "created": true, "updated": true,
 }
 
@@ -59,6 +61,16 @@ func Parse(id string, raw []byte) *Ticket {
 			t.Status = strings.ToLower(strings.TrimSpace(val.Value))
 		case "priority":
 			t.Priority = strings.ToLower(strings.TrimSpace(val.Value))
+		case "order":
+			// Reject non-finite values (nan/inf parse fine via ParseFloat) — an
+			// unguarded NaN survives to view.Ticket and breaks json.Marshal for the
+			// whole /api/tickets response, not just this card.
+			trimmed := strings.TrimSpace(val.Value)
+			if f, err := strconv.ParseFloat(trimmed, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+				t.Order = f
+			} else if trimmed != "" {
+				t.Warnings = append(t.Warnings, "order is not a finite number; ignored")
+			}
 		case "labels":
 			t.Labels = frontmatter.DecodeStringList(val, func(msg string) {
 				t.Warnings = append(t.Warnings, "labels "+msg)
@@ -96,6 +108,13 @@ func (t *Ticket) Serialize() []byte {
 	add("title", frontmatter.Scalar(t.Title))
 	add("status", frontmatter.Scalar(t.Status))
 	add("priority", frontmatter.Scalar(t.Priority))
+	// order is written only when a card has been manually placed, so untouched
+	// tickets keep a minimal, stable frontmatter (and existing files don't churn).
+	if t.Order != 0 {
+		on := &yaml.Node{}
+		_ = on.Encode(t.Order)
+		add("order", on)
+	}
 	if len(t.Labels) > 0 {
 		add("labels", frontmatter.Seq(t.Labels))
 	}

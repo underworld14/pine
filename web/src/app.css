@@ -70,7 +70,29 @@ kbd {
 }
 .flash { animation: flash-ring 1.4s ease-out; }
 
+/* Board drag affordances (classes applied by svelte-dnd-action). */
+.dragging {
+  transform: rotate(2.5deg) scale(1.02);
+  box-shadow: 0 14px 30px rgb(0 0 0 / 0.4);
+  cursor: grabbing;
+  opacity: 0.97;
+}
+.drop-active {
+  outline: 2px dashed color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: -4px;
+  border-radius: 8px;
+  background: var(--color-accent-soft);
+}
+
+/* Touch/coarse-pointer devices have no hover: always expose the card's quick-peek
+   button (unlayered so it beats Tailwind's opacity-0/pointer-events-none). */
+@media (hover: none) {
+  .peek-btn { opacity: 1; pointer-events: auto; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .flash { animation: none; }
+  .animate-pulse { animation: none; }
+  .dragging { transform: none; }
   * { transition: none !important; }
 }

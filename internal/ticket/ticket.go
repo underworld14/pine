@@ -39,6 +39,7 @@ type Ticket struct {
 	Title    string    // frontmatter title, or filename fallback
 	Status   string    // lowercased; "" when absent (board maps to first column)
 	Priority string    // raw; validated against config by doctor
+	Order    float64   // manual board sort key; 0 = unset (falls back to default sort)
 	Labels   []string  // may be empty
 	Deps     []string  // ticket IDs this ticket is blocked by
 	Parent   string    // epic ticket ID, or "" when none

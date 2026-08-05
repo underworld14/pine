@@ -36,6 +36,8 @@ func Merge3(base, ours, theirs *Ticket) (*Ticket, bool) {
 	conflict = conflict || c
 	m.Parent, c = mergeScalar(b.Parent, ours.Parent, theirs.Parent, ours.Updated, theirs.Updated)
 	conflict = conflict || c
+	m.Order, c = mergeFloat(b.Order, ours.Order, theirs.Order, ours.Updated, theirs.Updated)
+	conflict = conflict || c
 
 	m.Labels = mergeSet(b.Labels, ours.Labels, theirs.Labels)
 	m.Deps = mergeSet(b.Deps, ours.Deps, theirs.Deps)
@@ -65,6 +67,25 @@ func mergeScalar(base, ours, theirs string, ourUpd, theirUpd time.Time) (string,
 		return ours, false // only ours changed
 	}
 	// Both changed differently — newer wins, flag for review.
+	if theirUpd.After(ourUpd) {
+		return theirs, true
+	}
+	return ours, true
+}
+
+// mergeFloat resolves one numeric field (the manual board order). Same policy as
+// mergeScalar: only-one-side-changed takes that side; a two-sided divergence
+// resolves to the newer Updated and flags a conflict.
+func mergeFloat(base, ours, theirs float64, ourUpd, theirUpd time.Time) (float64, bool) {
+	if ours == theirs {
+		return ours, false
+	}
+	if ours == base {
+		return theirs, false // only theirs changed
+	}
+	if theirs == base {
+		return ours, false // only ours changed
+	}
 	if theirUpd.After(ourUpd) {
 		return theirs, true
 	}

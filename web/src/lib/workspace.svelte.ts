@@ -4,6 +4,7 @@
 // file makes the card move without any board.json change.
 
 import { api, PineEventSource, type Board, type Config, type GitStatus, type PineEvent, type Ticket } from './api';
+import { sortByEffective } from './board-order';
 
 type Conn = 'connecting' | 'live' | 'down';
 
@@ -22,8 +23,6 @@ export function readOnlyMessage(t: Ticket): string {
   const where = t.branch ? `branch "${t.branch}"` : 'another branch';
   return `${t.id} lives on ${where} and is read-only here. Check out that branch to edit it.`;
 }
-
-const PRIORITY_RANK: Record<string, number> = { critical: 3, high: 2, medium: 1, low: 0 };
 
 class WorkspaceStore {
   tickets = $state<Record<string, Ticket>>({});
@@ -78,13 +77,10 @@ class WorkspaceStore {
     return { open, testing, done, total: this.list.length };
   });
 
+  // Column order: manually-placed cards keep their persisted `order`; the rest
+  // fall back to priority/recency. All ordering logic lives in ./board-order.
   private sorted(ts: Ticket[]): Ticket[] {
-    return [...ts].sort((a, b) => {
-      const pa = PRIORITY_RANK[a.priority] ?? 1;
-      const pb = PRIORITY_RANK[b.priority] ?? 1;
-      if (pa !== pb) return pb - pa;
-      return b.updated.localeCompare(a.updated);
-    });
+    return sortByEffective(ts);
   }
 
   async hydrate() {
@@ -200,6 +196,30 @@ class WorkspaceStore {
       // Roll back only if no external update landed while the request was in
       // flight (our optimistic copy kept `before.hash`; an external change would
       // have replaced it with a different hash, which we must not clobber).
+      const cur = this.tickets[id];
+      if (cur && cur.hash === before.hash) {
+        this.tickets = { ...this.tickets, [id]: before };
+      }
+      throw e;
+    }
+  }
+
+  // Optimistic drag reorder: persists a new manual `order` (and `status` when the
+  // card crossed columns) in one PATCH. Reverts on failure, guarding against a
+  // concurrent external update just like move().
+  async reorder(id: string, changes: { status?: string; order?: number }) {
+    const before = this.tickets[id];
+    if (!before || before.readOnly) return;
+    const patch: Record<string, unknown> = {};
+    if (changes.status !== undefined && changes.status !== before.status) patch.status = changes.status;
+    if (changes.order !== undefined && changes.order !== before.order) patch.order = changes.order;
+    if (Object.keys(patch).length === 0) return; // nothing actually changed
+    const opId = this.trackOp();
+    this.tickets = { ...this.tickets, [id]: { ...before, ...patch } as Ticket };
+    try {
+      const updated = await api.patchTicket(id, { ...patch, opId }, before.hash);
+      this.tickets = { ...this.tickets, [id]: updated };
+    } catch (e) {
       const cur = this.tickets[id];
       if (cur && cur.hash === before.hash) {
         this.tickets = { ...this.tickets, [id]: before };

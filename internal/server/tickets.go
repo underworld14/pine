@@ -87,6 +87,7 @@ type ticketPatch struct {
 	Title    *string   `json:"title"`
 	Status   *string   `json:"status"`
 	Priority *string   `json:"priority"`
+	Order    *float64  `json:"order"`
 	Labels   *[]string `json:"labels"`
 	Deps     *[]string `json:"deps"`
 	Parent   *string   `json:"parent"`
@@ -117,6 +118,9 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Priority != nil {
 			u.Priority = *p.Priority
+		}
+		if p.Order != nil {
+			u.Order = *p.Order
 		}
 		if p.Labels != nil {
 			u.Labels = *p.Labels
