@@ -131,8 +131,20 @@ func TestListShowReadyTextOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(listOut, "BUG-001") || !strings.Contains(listOut, "STATUS") {
-		t.Fatalf("list text output missing table:\n%s", listOut)
+	// Default list is a hierarchical tree (epic → children).
+	if !strings.Contains(listOut, "BUG-001") || !strings.Contains(listOut, "EPIC-001") {
+		t.Fatalf("list text output missing tickets:\n%s", listOut)
+	}
+	if !strings.Contains(listOut, "├──") && !strings.Contains(listOut, "└──") {
+		t.Fatalf("list tree missing nest connectors:\n%s", listOut)
+	}
+
+	flatOut, err := run(t, dir, "list", "--flat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flatOut, "BUG-001") || !strings.Contains(flatOut, "STATUS") {
+		t.Fatalf("list --flat missing table:\n%s", flatOut)
 	}
 
 	showOut, err := run(t, dir, "show", "BUG-001")

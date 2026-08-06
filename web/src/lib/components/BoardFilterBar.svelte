@@ -1,9 +1,9 @@
 <script lang="ts">
   import { emptyFilter, isActive, toggle, type BoardFilter } from '$lib/board-filter';
+  import { PRIORITIES, priorityMeta } from '$lib/ui-helpers';
 
   let { filter, labels, onChange }: { filter: BoardFilter; labels: string[]; onChange: (f: BoardFilter) => void } = $props();
 
-  const PRIORITIES = ['critical', 'high', 'medium', 'low'];
   const active = $derived(isActive(filter));
 </script>
 
@@ -19,18 +19,21 @@
 
   <div class="flex items-center gap-1" role="group" aria-label="Filter by priority">
     {#each PRIORITIES as p}
+      {@const meta = priorityMeta(p)}
       <button
         type="button"
         data-testid={`board-filter-prio-${p}`}
+        aria-label={meta.label}
         aria-pressed={filter.priorities.includes(p)}
         onclick={() => onChange({ ...filter, priorities: toggle(filter.priorities, p) })}
-        class="rounded-md border px-2 py-0.5 text-[11px] capitalize transition-colors"
+        class="min-h-10 min-w-10 rounded-md border px-2 text-[11px] font-semibold tracking-wide transition-[transform,color,border-color,background-color] duration-150 ease-out active:scale-[0.96]"
         class:border-accent={filter.priorities.includes(p)}
         class:text-accent={filter.priorities.includes(p)}
         class:border-border={!filter.priorities.includes(p)}
         class:text-dim={!filter.priorities.includes(p)}
+        style={filter.priorities.includes(p) ? `color: ${meta.color}; border-color: ${meta.color}` : undefined}
       >
-        {p}
+        {meta.short}
       </button>
     {/each}
   </div>

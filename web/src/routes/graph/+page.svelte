@@ -50,7 +50,7 @@
   <header>
     <div>
       <h1>Graph</h1>
-      <p class="sub">Typed links across tickets, memory topics, and learnings</p>
+      <p class="sub">Typed links across tickets, memory topics, and learnings · drag nodes · hover to focus</p>
     </div>
     <button class="reload" onclick={load} disabled={loading}>Reload</button>
   </header>

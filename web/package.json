@@ -18,6 +18,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/svelte": "^5.2.4",
+    "@types/d3-force": "^3.0.10",
     "@types/dompurify": "^3.0.5",
     "@types/markdown-it": "^14.1.2",
     "happy-dom": "^15.11.0",
@@ -29,6 +30,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "d3-force": "^3.0.0",
     "dompurify": "^3.2.0",
     "markdown-it": "^14.1.0",
     "markdown-it-task-lists": "^2.1.1",

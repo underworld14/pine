@@ -1,5 +1,14 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { GraphData, GraphEdge, GraphNode, GraphNodeKind } from '$lib/api';
+  import {
+    buildAdjacency,
+    createGraphSimulation,
+    focusSet,
+    type ForceNode,
+    type GraphSimulation,
+    type Pos
+  } from '$lib/graph-force';
 
   let {
     data,
@@ -17,10 +26,8 @@
     onnavigate?: (node: GraphNode) => void;
   } = $props();
 
-  const NODE_W = 120;
-  const NODE_H = 36;
-
-  type Pos = { x: number; y: number };
+  const NODE_R = 10;
+  const DRAG_THRESHOLD = 4;
 
   const visible = $derived(
     (data.nodes ?? []).filter((n) => {
@@ -38,19 +45,35 @@
     (data.edges ?? []).filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
   );
 
-  const positions = $derived(layoutRings(visible));
+  const adjacency = $derived(buildAdjacency(edges));
+
+  let positions = $state<Record<string, Pos>>({});
+  let hoverId = $state<string | null>(null);
+  let sim: GraphSimulation | null = null;
 
   let vbX = $state(0);
   let vbY = $state(0);
   let vbW = $state(900);
   let vbH = $state(640);
-  let dragging = $state(false);
+
+  let panning = $state(false);
   let lastX = 0;
   let lastY = 0;
 
-  $effect(() => {
-    // Fit viewBox loosely around laid-out nodes when data changes.
-    const vals = Object.values(positions);
+  let draggingNode: ForceNode | null = null;
+  let dragMoved = false;
+  let dragStartClient = { x: 0, y: 0 };
+  let pendingClick: GraphNode | null = null;
+
+  const focused = $derived(focusSet(hoverId, adjacency));
+
+  function prefersReducedMotion(): boolean {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function fitViewBox(pos: Record<string, Pos>) {
+    const vals = Object.values(pos);
     if (!vals.length) {
       vbX = 0;
       vbY = 0;
@@ -65,72 +88,48 @@
     for (const p of vals) {
       minX = Math.min(minX, p.x);
       minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + NODE_W);
-      maxY = Math.max(maxY, p.y + NODE_H);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
     }
-    const pad = 80;
+    const pad = 100;
     vbX = minX - pad;
     vbY = minY - pad;
     vbW = Math.max(400, maxX - minX + pad * 2);
     vbH = Math.max(300, maxY - minY + pad * 2);
+  }
+
+  // Stable key so filter/data changes rebuild the sim without tracking tick positions.
+  const simKey = $derived.by(() => {
+    const ids = visible.map((n) => n.id).join('\0');
+    const eds = edges.map((e) => `${e.source}\0${e.target}\0${e.kind}`).join('\x01');
+    return `${ids}\x02${eds}`;
   });
 
-  function layoutRings(nodes: GraphNode[]): Record<string, Pos> {
-    const byKind: Record<string, GraphNode[]> = {
-      ticket: [],
-      learning: [],
-      topic: [],
-      memory: [],
-      unknown: []
+  $effect(() => {
+    // Track topology key only — not array identity from Reload with same graph.
+    void simKey;
+    const { nodes, eds } = untrack(() => ({ nodes: visible, eds: edges }));
+
+    sim?.stop();
+    const next = createGraphSimulation(nodes, eds, {
+      reducedMotion: prefersReducedMotion(),
+      onTick: (pos) => {
+        positions = pos;
+      }
+    });
+    sim = next;
+    const initial = next.getPositions();
+    positions = initial;
+    fitViewBox(initial);
+
+    return () => {
+      draggingNode = null;
+      pendingClick = null;
+      dragMoved = false;
+      next.stop();
+      if (sim === next) sim = null;
     };
-    for (const n of nodes) {
-      (byKind[n.kind] ?? byKind.unknown).push(n);
-    }
-    for (const k of Object.keys(byKind)) {
-      byKind[k].sort((a, b) => a.id.localeCompare(b.id));
-    }
-    const cx = 450;
-    const cy = 320;
-    const radii: Record<string, number> = {
-      ticket: 0,
-      learning: 160,
-      topic: 280,
-      memory: 380,
-      unknown: 420
-    };
-    const out: Record<string, Pos> = {};
-    // Tickets in a compact grid at center when many.
-    const tickets = byKind.ticket;
-    if (tickets.length <= 1) {
-      if (tickets[0]) out[tickets[0].id] = { x: cx - NODE_W / 2, y: cy - NODE_H / 2 };
-    } else {
-      const cols = Math.ceil(Math.sqrt(tickets.length));
-      const gap = 16;
-      const totalW = cols * (NODE_W + gap) - gap;
-      const rows = Math.ceil(tickets.length / cols);
-      const totalH = rows * (NODE_H + gap) - gap;
-      tickets.forEach((n, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        out[n.id] = {
-          x: cx - totalW / 2 + col * (NODE_W + gap),
-          y: cy - totalH / 2 + row * (NODE_H + gap)
-        };
-      });
-    }
-    for (const kind of ['learning', 'topic', 'memory', 'unknown'] as GraphNodeKind[]) {
-      const list = byKind[kind] ?? [];
-      const r = radii[kind] ?? 400;
-      list.forEach((n, i) => {
-        const angle = (2 * Math.PI * i) / Math.max(list.length, 1) - Math.PI / 2;
-        out[n.id] = {
-          x: cx + Math.cos(angle) * r - NODE_W / 2,
-          y: cy + Math.sin(angle) * r - NODE_H / 2
-        };
-      });
-    }
-    return out;
-  }
+  });
 
   function edgeColor(e: GraphEdge): string {
     if (e.kind === 'dep') return 'var(--color-accent)';
@@ -138,11 +137,28 @@
     return 'var(--color-warn)';
   }
 
-  function nodeStroke(kind: GraphNodeKind): string {
+  function nodeFill(kind: GraphNodeKind): string {
     if (kind === 'ticket') return 'var(--color-accent)';
     if (kind === 'topic') return 'var(--color-warn)';
     if (kind === 'learning') return 'var(--color-dim)';
     return 'var(--color-border)';
+  }
+
+  function isDimmed(id: string): boolean {
+    return focused !== null && !focused.has(id);
+  }
+
+  function edgeDimmed(e: GraphEdge): boolean {
+    if (!focused) return false;
+    return !(focused.has(e.source) && focused.has(e.target));
+  }
+
+  function clientToSvg(svg: SVGSVGElement, clientX: number, clientY: number): Pos {
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: vbX + ((clientX - rect.left) / rect.width) * vbW,
+      y: vbY + ((clientY - rect.top) / rect.height) * vbH
+    };
   }
 
   function onWheel(e: WheelEvent) {
@@ -159,15 +175,48 @@
   }
 
   function onPointerDown(e: PointerEvent) {
-    if ((e.target as Element).closest('a,button,.node-hit')) return;
-    dragging = true;
+    const target = e.target as Element;
+    const hit = target.closest('.node-hit') as SVGElement | null;
+    if (hit) {
+      const id = hit.dataset.id;
+      if (!id || !sim) return;
+      const n = sim.nodes.find((x) => x.id === id);
+      if (!n) return;
+      draggingNode = n;
+      dragMoved = false;
+      dragStartClient = { x: e.clientX, y: e.clientY };
+      pendingClick = visible.find((v) => v.id === id) ?? null;
+      // Soft-hold at current pos; reheat only once drag actually starts.
+      n.fx = n.x;
+      n.fy = n.y;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      e.stopPropagation();
+      return;
+    }
+    panning = true;
     lastX = e.clientX;
     lastY = e.clientY;
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   }
+
   function onPointerMove(e: PointerEvent) {
-    if (!dragging) return;
     const svg = e.currentTarget as SVGSVGElement;
+    if (draggingNode && sim) {
+      const dx = e.clientX - dragStartClient.x;
+      const dy = e.clientY - dragStartClient.y;
+      const moved = Math.hypot(dx, dy) > DRAG_THRESHOLD;
+      if (moved && !dragMoved) {
+        dragMoved = true;
+        sim.reheat();
+      }
+      if (!moved && !dragMoved) return;
+      const p = clientToSvg(svg, e.clientX, e.clientY);
+      draggingNode.fx = p.x;
+      draggingNode.fy = p.y;
+      positions = { ...positions, [draggingNode.id]: { x: p.x, y: p.y } };
+      return;
+    }
+    if (!panning) return;
     const dx = ((e.clientX - lastX) / svg.clientWidth) * vbW;
     const dy = ((e.clientY - lastY) / svg.clientHeight) * vbH;
     vbX -= dx;
@@ -175,17 +224,48 @@
     lastX = e.clientX;
     lastY = e.clientY;
   }
+
   function onPointerUp() {
-    dragging = false;
+    if (draggingNode) {
+      if (!dragMoved) {
+        // Click-to-navigate: release temporary hold without energizing the sim.
+        draggingNode.fx = null;
+        draggingNode.fy = null;
+        if (pendingClick) onnavigate?.(pendingClick);
+      }
+      // After a real drag, keep fx/fy so the node stays pinned (Obsidian-like).
+      draggingNode = null;
+      pendingClick = null;
+      dragMoved = false;
+      return;
+    }
+    panning = false;
   }
 
-  function clickNode(n: GraphNode) {
-    onnavigate?.(n);
+  /** Shorten edge endpoints so arrows meet the circle rim, not the center. */
+  function edgeEnds(a: Pos, b: Pos): { x1: number; y1: number; x2: number; y2: number } {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const tip = NODE_R + 5;
+    return {
+      x1: a.x + ux * NODE_R,
+      y1: a.y + uy * NODE_R,
+      x2: b.x - ux * tip,
+      y2: b.y - uy * tip
+    };
+  }
+
+  function labelFor(n: GraphNode): string {
+    return n.id.length > 18 ? n.id.slice(0, 16) + '…' : n.id;
   }
 </script>
 
 <svg
   class="graph"
+  class:panning
   viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
   role="img"
   aria-label="Knowledge graph"
@@ -205,16 +285,19 @@
     {@const a = positions[e.source]}
     {@const b = positions[e.target]}
     {#if a && b}
+      {@const ends = edgeEnds(a, b)}
       <line
         class="edge"
         class:dashed={e.kind === 'parent'}
         class:link={e.kind === 'link'}
-        x1={a.x + NODE_W / 2}
-        y1={a.y + NODE_H / 2}
-        x2={b.x + NODE_W / 2}
-        y2={b.y + NODE_H / 2}
+        class:dimmed={edgeDimmed(e)}
+        class:focused={focused !== null && !edgeDimmed(e)}
+        x1={ends.x1}
+        y1={ends.y1}
+        x2={ends.x2}
+        y2={ends.y2}
         stroke={edgeColor(e)}
-        marker-end="url(#gv-arrow)"
+        marker-end={e.kind === 'dep' ? 'url(#gv-arrow)' : undefined}
       />
     {/if}
   {/each}
@@ -222,18 +305,22 @@
   {#each visible as n (n.id)}
     {@const p = positions[n.id]}
     {#if p}
-      <g class="node-hit" role="button" tabindex="0" onclick={() => clickNode(n)} onkeydown={(ev) => ev.key === 'Enter' && clickNode(n)}>
-        <rect
-          class="node"
-          x={p.x}
-          y={p.y}
-          width={NODE_W}
-          height={NODE_H}
-          rx="9"
-          stroke={nodeStroke(n.kind)}
-        />
-        <text class="nid" x={p.x + 10} y={p.y + 15}>{n.id.length > 16 ? n.id.slice(0, 14) + '…' : n.id}</text>
-        <text class="nsub" x={p.x + 10} y={p.y + 28}>{n.kind}{n.status ? ` · ${n.status}` : ''}</text>
+      <g
+        class="node-hit"
+        class:dimmed={isDimmed(n.id)}
+        class:focused={focused !== null && focused.has(n.id)}
+        data-id={n.id}
+        role="button"
+        tabindex="0"
+        aria-label={`${n.kind} ${n.id}`}
+        onpointerenter={() => (hoverId = n.id)}
+        onpointerleave={() => {
+          if (hoverId === n.id) hoverId = null;
+        }}
+        onkeydown={(ev) => ev.key === 'Enter' && onnavigate?.(n)}
+      >
+        <circle class="node" cx={p.x} cy={p.y} r={NODE_R} fill={nodeFill(n.kind)} />
+        <text class="nid" x={p.x} y={p.y + NODE_R + 12} text-anchor="middle">{labelFor(n)}</text>
       </g>
     {/if}
   {/each}
@@ -254,27 +341,26 @@
     cursor: grab;
     touch-action: none;
   }
-  .graph:active {
+  .graph:active,
+  .graph.panning {
     cursor: grabbing;
   }
   .node {
-    fill: var(--color-surface-2, var(--color-surface));
-    stroke-width: 1.8;
+    stroke: var(--color-surface);
+    stroke-width: 2;
   }
   .nid {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10px;
     fill: var(--color-text);
-  }
-  .nsub {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    fill: var(--color-dim);
+    pointer-events: none;
+    user-select: none;
   }
   .edge {
     stroke-width: 1.4;
     fill: none;
-    opacity: 0.85;
+    opacity: 0.75;
+    transition: opacity 0.15s ease;
   }
   .edge.dashed {
     stroke-dasharray: 5 4;
@@ -282,15 +368,37 @@
   .edge.link {
     stroke-dasharray: 2 3;
   }
+  .edge.focused {
+    opacity: 1;
+    stroke-width: 2;
+  }
+  .edge.dimmed {
+    opacity: 0.12;
+  }
   .node-hit {
     cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  .node-hit.focused .node {
+    stroke: var(--color-text);
+    stroke-width: 2.5;
+  }
+  .node-hit.dimmed {
+    opacity: 0.18;
   }
   .node-hit:focus-visible .node {
     outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
   }
   .empty {
     color: var(--color-dim);
     font-size: 13px;
     margin-top: 12px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .edge,
+    .node-hit {
+      transition: none;
+    }
   }
 </style>

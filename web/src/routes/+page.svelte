@@ -39,7 +39,7 @@
           {:else}
             {#each items as Ticket[] as t}
               <a class="row" href={`/tickets/${t.id}`}>
-                <span class="prio" style="color: {priorityMeta(t.priority).color}">{priorityMeta(t.priority).glyph}</span>
+                <span class="prio" style="color: {priorityMeta(t.priority).color}" aria-label={priorityMeta(t.priority).label}>{priorityMeta(t.priority).short}</span>
                 <span class="mono id">{t.id}</span>
                 <span class="title">{t.title}</span>
                 {#if t.blocked}<span title="blocked">🔒</span>{/if}
@@ -63,7 +63,7 @@
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-dim); margin: 0 0 8px; }
   .row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; text-decoration: none; color: inherit; font-size: 13px; }
   .row:hover { background: var(--color-surface-2); }
-  .prio { font-size: 10px; }
+  .prio { font-size: 10px; font-weight: 650; letter-spacing: 0.02em; }
   .id { color: var(--color-dim); font-size: 11px; }
   .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .time { color: var(--color-dim); font-size: 11px; }

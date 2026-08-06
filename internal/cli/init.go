@@ -21,7 +21,7 @@ import (
 const (
 	tmplBug     = "# Description\n\n# Steps to Reproduce\n\n# Expected\n\n# Actual\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Related Files\n\n# Attachments\n"
 	tmplFeature = "# Description\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Implementation Plan\n\n# Notes\n\n# Related Files\n\n# Attachments\n"
-	tmplEpic    = "# Description\n\n# Goals\n\n# Child Tickets\n"
+	tmplEpic    = "# Description\n\n# Goals\n"
 
 	promptFix = contextgen.DefaultFixTemplate
 )

@@ -20,12 +20,16 @@ func newListCmd() *cobra.Command {
 	var (
 		status, typ, label, parent string
 		onlyBlocked, onlyReady     bool
-		asJSON                     bool
+		asJSON, flat               bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets (filterable), with dependency state",
-		Args:  cobra.NoArgs,
+		Long: `List tickets with dependency state.
+
+By default, tickets are shown as a hierarchical tree (epic → children),
+Beads-style. Use --flat for the classic ID/STATUS/PRI table.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := openStore()
 			if err != nil {
@@ -35,7 +39,11 @@ func newListCmd() *cobra.Command {
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), views)
 			}
-			renderTicketTable(cmd.OutOrStdout(), views)
+			if flat {
+				renderTicketTable(cmd.OutOrStdout(), views)
+			} else {
+				renderTicketTree(cmd.OutOrStdout(), views)
+			}
 			return nil
 		},
 	}
@@ -46,6 +54,7 @@ func newListCmd() *cobra.Command {
 	f.StringVar(&parent, "parent", "", "filter by epic parent id")
 	f.BoolVar(&onlyBlocked, "blocked", false, "only blocked tickets")
 	f.BoolVar(&onlyReady, "ready", false, "only ready (unblocked, open) tickets")
+	f.BoolVar(&flat, "flat", false, "classic table instead of hierarchical tree")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
 }

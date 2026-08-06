@@ -14,6 +14,8 @@ describe('BoardFilterBar', () => {
   it('toggles a priority', async () => {
     const onChange = vi.fn();
     render(BoardFilterBar, { filter: emptyFilter(), labels: [], onChange });
+    expect(screen.getByTestId('board-filter-prio-high').textContent).toContain('High');
+    expect(screen.getByTestId('board-filter-prio-medium').textContent).toContain('Med');
     await fireEvent.click(screen.getByTestId('board-filter-prio-high'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ priorities: ['high'] }));
   });

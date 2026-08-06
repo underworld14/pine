@@ -1,10 +1,10 @@
 class UIStore {
   modalOpen = $state(false);
-  modalDefaults = $state<{ type?: string; status?: string }>({});
+  modalDefaults = $state<{ type?: string; status?: string; parent?: string }>({});
   paletteOpen = $state(false);
   theme = $state<'dark' | 'light'>('dark');
 
-  openModal(defaults: { type?: string; status?: string } = {}) {
+  openModal(defaults: { type?: string; status?: string; parent?: string } = {}) {
     this.modalDefaults = defaults;
     this.modalOpen = true;
   }

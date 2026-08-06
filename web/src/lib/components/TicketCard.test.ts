@@ -12,10 +12,11 @@ function mk(extra: Partial<Ticket> = {}): Ticket {
 }
 
 describe('TicketCard', () => {
-  it('renders the id, title, and a label chip', () => {
+  it('renders the id, title, short priority label, and a label chip', () => {
     render(TicketCard, { ticket: mk() });
     expect(screen.getByText('BUG-1')).toBeTruthy();
     expect(screen.getByText('Login is broken')).toBeTruthy();
+    expect(screen.getByLabelText('High').textContent).toContain('High');
     expect(screen.getByText('ui')).toBeTruthy();
   });
 

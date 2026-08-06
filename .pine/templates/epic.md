@@ -1,5 +1,3 @@
 # Description
 
 # Goals
-
-# Child Tickets

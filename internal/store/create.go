@@ -14,7 +14,7 @@ import (
 const (
 	bugTemplate     = "\n# Description\n\n# Steps\n\n# Expected\n\n# Actual\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Related Files\n\n# Attachments\n"
 	featureTemplate = "\n# Description\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Implementation Plan\n\n# Notes\n\n# Related Files\n\n# Attachments\n"
-	epicTemplate    = "\n# Description\n\n# Goals\n\n# Child Tickets\n"
+	epicTemplate    = "\n# Description\n\n# Goals\n"
 )
 
 // CreateReq describes a new ticket. Type may be an ID prefix ("BUG") or a type

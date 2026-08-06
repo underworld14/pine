@@ -12,6 +12,7 @@
   } from '$lib/insert-at-cursor';
   import { FileMentionController } from '$lib/file-mention-controller.svelte';
   import FileMentionPopup from '$lib/components/FileMentionPopup.svelte';
+  import PrioritySeg from '$lib/components/PrioritySeg.svelte';
   import type { FileSuggestItem } from '$lib/file-mention';
 
   type Staged = { key: string; file: File };
@@ -65,6 +66,8 @@
       queueMicrotask(() => titleEl?.focus());
     }
   });
+
+  const parentId = $derived(ui.modalDefaults.parent ?? '');
 
   function composeBody(): string {
     const d = description.trim();
@@ -129,6 +132,7 @@
         priority,
         labels,
         status: ui.modalDefaults.status,
+        parent: parentId || undefined,
         body
       });
       if (snapshot.length) {
@@ -252,6 +256,9 @@
         {/each}
         <span class="hint"><kbd>Esc</kbd> cancel · <kbd>⌘↵</kbd> create</span>
       </div>
+      {#if parentId}
+        <p class="parent-hint" data-testid="modal-parent-hint">Child of <span class="mono">{parentId}</span></p>
+      {/if}
       <input bind:this={titleEl} bind:value={title} class="title" placeholder="Title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
       <textarea
         bind:this={descEl}
@@ -263,11 +270,7 @@
         onkeydown={onDescKeydown}
       ></textarea>
       <div class="controls">
-        <div class="seg">
-          {#each ['low', 'medium', 'high', 'critical'] as p}
-            <button type="button" class:active={priority === p} onclick={() => (priority = p)}>{p}</button>
-          {/each}
-        </div>
+        <PrioritySeg value={priority} onChange={(p) => (priority = p)} testIdPrefix="modal-prio" />
         <input
           bind:value={labelsRaw}
           class="labels"
@@ -321,13 +324,19 @@
   .typebtn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--color-border); background: var(--color-surface-2); font-size: 12px; }
   .typebtn.active { border-color: var(--color-accent); color: var(--color-accent); }
   .hint { margin-left: auto; color: var(--color-dim); font-size: 11px; }
+  .parent-hint {
+    margin: -4px 0 10px;
+    font-size: 12px;
+    color: var(--color-dim);
+  }
+  .parent-hint .mono {
+    font-family: var(--font-mono);
+    color: var(--color-accent);
+  }
   .title { width: 100%; padding: 8px 10px; font-size: 16px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; outline: none; }
   .title:focus { border-color: var(--color-accent); }
   .desc { width: 100%; margin-top: 8px; padding: 8px 10px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; outline: none; resize: vertical; }
-  .controls { display: flex; gap: 8px; margin-top: 8px; }
-  .seg { display: flex; border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; }
-  .seg button { padding: 4px 8px; font-size: 11px; background: var(--color-surface-2); border: none; text-transform: capitalize; }
-  .seg button.active { background: var(--color-accent-soft); color: var(--color-accent); }
+  .controls { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
   .labels { flex: 1; padding: 4px 10px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; outline: none; font-size: 12px; }
   .staged { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
   .thumb { display: flex; align-items: center; gap: 6px; font-size: 11px; background: var(--color-surface-2); padding: 3px 8px; border-radius: 6px; }

@@ -6,7 +6,7 @@
   import { toasts } from '$lib/toast.svelte';
   import { api, ApiError, type Ticket } from '$lib/api';
   import { renderMarkdown } from '$lib/markdown';
-  import { priorityMeta, labelColor } from '$lib/ui-helpers';
+  import { labelColor } from '$lib/ui-helpers';
   import { relTime, bytes } from '$lib/format';
   import { reconcileEditor } from '$lib/ticket-editor';
   import {
@@ -18,6 +18,9 @@
   import { FileMentionController } from '$lib/file-mention-controller.svelte';
   import FileMentionPopup from '$lib/components/FileMentionPopup.svelte';
   import TicketGraph from '$lib/components/TicketGraph.svelte';
+  import TicketRelations from '$lib/components/TicketRelations.svelte';
+  import TicketPeekSheet from '$lib/components/TicketPeekSheet.svelte';
+  import PrioritySeg from '$lib/components/PrioritySeg.svelte';
 
   const id = $derived($page.params.id ?? '');
   const ticket = $derived(workspace.get(id));
@@ -40,7 +43,43 @@
   // Locked content height so preview ↔ edit don't jump. Null = size to content.
   let paneHeight = $state<number | null>(null);
   let lightbox = $state<string | null>(null);
+  let peekId = $state<string | null>(null);
+  let peekSheet = $state<{ flushPending?: () => Promise<void> } | null>(null);
   const fileMention = new FileMentionController();
+
+  const overflowSectionId: Record<string, string> = {
+    blocked: 'rel-blocked',
+    blocks: 'rel-blocks',
+    children: 'rel-children',
+    related: 'rel-related'
+  };
+
+  async function openPeek(ticketId: string) {
+    if (peekId && peekId !== ticketId) {
+      await peekSheet?.flushPending?.();
+    }
+    peekId = ticketId;
+  }
+
+  async function closePeek() {
+    await peekSheet?.flushPending?.();
+    peekId = null;
+  }
+
+  function scrollToRelation(section: 'blocked' | 'blocks' | 'children' | 'related') {
+    const el = document.getElementById(overflowSectionId[section]);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    (el as HTMLElement | null)?.focus?.();
+  }
+
+  // Close peek when navigating to a different ticket (effect cleanup).
+  $effect(() => {
+    void id;
+    return () => {
+      void peekSheet?.flushPending?.();
+      peekId = null;
+    };
+  });
 
   /** Size the textarea to its content and sync paneHeight (allows shrink). */
   function fitTextarea() {
@@ -187,6 +226,13 @@
       lightbox = null;
       return;
     }
+    if (e.key === 'Escape' && peekId) {
+      e.preventDefault();
+      void closePeek();
+      return;
+    }
+    // Peek owns focus/shortcuts while open — don't start edit under the sheet.
+    if (peekId) return;
     if (readOnly) return;
     if (e.key === 'Escape' && fileMention.open) {
       e.preventDefault();
@@ -212,6 +258,7 @@
     const t = e.target as HTMLElement | null;
     if (t?.closest('[data-file-mention]')) return;
     if (t?.closest('[data-testid="conflict-banner"]')) return;
+    if (t?.closest('[data-testid="ticket-peek-backdrop"]')) return;
     if (t && editorShellEl?.contains(t)) return;
     fileMention.close();
     finishEdit();
@@ -405,11 +452,12 @@
         {#each workspace.board?.columns ?? [] as c}<option value={c.status}>{c.title}</option>{/each}
         {#if !(workspace.board?.columns ?? []).some((c) => c.status === ticket.status)}<option value={ticket.status}>{ticket.status}</option>{/if}
       </select>
-      <div class="seg">
-        {#each ['low', 'medium', 'high', 'critical'] as p}
-          <button class:active={ticket.priority === p} disabled={readOnly} style="--c: {priorityMeta(p).color}" onclick={() => setField({ priority: p })} title={p}>{priorityMeta(p).glyph}</button>
-        {/each}
-      </div>
+      <PrioritySeg
+        value={ticket.priority}
+        disabled={readOnly}
+        testIdPrefix="ticket-prio"
+        onChange={(p) => setField({ priority: p })}
+      />
       <div class="labels">
         {#each ticket.labels as l}
           <span class="chip" style="--c: {labelColor(l)}">{l}{#if !readOnly}<button onclick={() => removeLabel(l)}>×</button>{/if}</span>
@@ -422,10 +470,8 @@
       {#if ticket.acceptance?.total}<span class="updated">AC {ticket.acceptance.done}/{ticket.acceptance.total}</span>{/if}
     </div>
 
-    <TicketGraph {ticket} />
-    {#if ticket.epicProgress}
-      <p class="epic-summary">Children ({ticket.epicProgress.done}/{ticket.epicProgress.total} done)</p>
-    {/if}
+    <TicketGraph {ticket} onSelectTicket={openPeek} onOverflow={scrollToRelation} />
+    <TicketRelations {ticket} onSelectTicket={openPeek} />
 
     {#if conflict}
       <div class="conflict" data-testid="conflict-banner" role="alert">
@@ -551,6 +597,10 @@
     </div>
   {/if}
 
+  {#if peekId}
+    <TicketPeekSheet bind:this={peekSheet} ticketId={peekId} onClose={() => (peekId = null)} />
+  {/if}
+
   {#if fileMention.open}
     <div data-file-mention>
       <FileMentionPopup
@@ -609,18 +659,14 @@
   .ro-badge { font-family: var(--font-mono); font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--color-surface-2); color: var(--color-dim); white-space: nowrap; }
   .ro-copy { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 2px 8px; font-size: 11px; margin-left: auto; }
   .title[readonly] { border-color: transparent; opacity: 0.85; }
-  select:disabled, .seg button:disabled { opacity: 0.6; }
+  select:disabled { opacity: 0.6; }
   .meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
   select { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
-  .seg { display: flex; border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; }
-  .seg button { padding: 3px 8px; background: var(--color-surface-2); border: none; }
-  .seg button.active { background: var(--color-accent-soft); color: var(--c); }
   .labels { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .chip { font-size: 11px; padding: 1px 4px 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); display: inline-flex; align-items: center; gap: 4px; }
   .chip button { background: none; border: none; color: inherit; }
   .labels input { width: 80px; background: none; border: 1px dashed var(--color-border); border-radius: 6px; padding: 2px 6px; font-size: 11px; }
   .updated { margin-left: auto; color: var(--color-dim); font-size: 11px; }
-  .epic-summary { font-size: 12px; color: var(--color-dim); margin: -4px 0 12px; }
   .conflict { background: color-mix(in srgb, var(--color-warn) 12%, var(--color-surface)); border: 1px solid var(--color-warn); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
   .conflict button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
   .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 28px; }

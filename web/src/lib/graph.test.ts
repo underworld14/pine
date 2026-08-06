@@ -41,6 +41,14 @@ describe('neighborhood', () => {
     expect(n.truncated.dependents).toBe(2);
   });
 
+  it('returns uncapped lists when cap is Infinity', () => {
+    const all: Record<string, Ticket> = { 'EPIC-1': tk({ id: 'EPIC-1', type: 'EPIC' }) };
+    for (let i = 0; i < 10; i++) all[`C-${i}`] = tk({ id: `C-${i}`, parent: 'EPIC-1' });
+    const n = neighborhood(all['EPIC-1'], all, Number.POSITIVE_INFINITY);
+    expect(n.children.length).toBe(10);
+    expect(n.truncated.children).toBe(0);
+  });
+
   it('resolves typed memory links', () => {
     const all: Record<string, Ticket> = {
       'BUG-1': tk({ id: 'BUG-1', links: ['memory/web', 'FEAT-2', 'MEMORY'] }),

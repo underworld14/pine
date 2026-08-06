@@ -1,10 +1,27 @@
-export function priorityMeta(p: string): { label: string; color: string; glyph: string } {
+export const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+export type PriorityValue = (typeof PRIORITIES)[number];
+
+export type PriorityMeta = {
+  label: string;
+  /** Compact control label — readable without a tooltip. */
+  short: string;
+  color: string;
+  /** Legacy glyph; prefer `short` for UI. */
+  glyph: string;
+};
+
+export function priorityMeta(p: string): PriorityMeta {
   switch (p) {
-    case 'critical': return { label: 'Critical', color: 'var(--color-danger)', glyph: '◆' };
-    case 'high': return { label: 'High', color: 'var(--color-warn)', glyph: '▲' };
-    case 'medium': return { label: 'Medium', color: 'var(--color-info)', glyph: '●' };
-    case 'low': return { label: 'Low', color: 'var(--color-dim)', glyph: '▽' };
-    default: return { label: p, color: 'var(--color-dim)', glyph: '○' };
+    case 'critical':
+      return { label: 'Critical', short: 'Crit', color: 'var(--color-danger)', glyph: '◆' };
+    case 'high':
+      return { label: 'High', short: 'High', color: 'var(--color-warn)', glyph: '▲' };
+    case 'medium':
+      return { label: 'Medium', short: 'Med', color: 'var(--color-info)', glyph: '●' };
+    case 'low':
+      return { label: 'Low', short: 'Low', color: 'var(--color-dim)', glyph: '▽' };
+    default:
+      return { label: p, short: p, color: 'var(--color-dim)', glyph: '○' };
   }
 }
 

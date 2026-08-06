@@ -4,6 +4,7 @@
   import { toasts } from '$lib/toast.svelte';
   import { priorityMeta } from '$lib/ui-helpers';
   import type { Ticket } from '$lib/api';
+  import PrioritySeg from '$lib/components/PrioritySeg.svelte';
 
   let { ticket, anchor = null, onClose }: { ticket: Ticket; anchor?: DOMRect | null; onClose: () => void } = $props();
 
@@ -98,7 +99,7 @@
     class="fixed w-[300px] max-w-[92vw] rounded-[10px] border border-border bg-surface p-3 shadow-[0_8px_32px_rgb(0_0_0/0.45)] outline-none"
   >
     <div class="flex items-center gap-2">
-      <span class="text-[10px]" style={`color:${pm.color}`} title={pm.label}>{pm.glyph}</span>
+      <span class="text-[11px] font-semibold tracking-wide" style={`color:${pm.color}`} aria-label={pm.label}>{pm.short}</span>
       <span class="mono text-[11px] text-dim">{t.id}</span>
       <button type="button" onclick={onClose} aria-label="Close" class="ml-auto text-dim hover:text-text">×</button>
     </div>
@@ -119,22 +120,12 @@
     </select>
 
     <div class="mt-3 text-[10px] uppercase tracking-wide text-dim">Priority</div>
-    <div class="mt-1 flex overflow-hidden rounded-md border border-border" role="group" aria-label="Priority">
-      {#each ['low', 'medium', 'high', 'critical'] as p}
-        <button
-          type="button"
-          data-testid={`quick-peek-prio-${p}`}
-          aria-pressed={t.priority === p}
-          onclick={() => setField({ priority: p })}
-          class="flex-1 border-0 px-1 py-1 text-[11px] capitalize transition-colors"
-          class:bg-accent-soft={t.priority === p}
-          class:text-accent={t.priority === p}
-          class:bg-surface-2={t.priority !== p}
-          class:text-dim={t.priority !== p}
-        >
-          {p}
-        </button>
-      {/each}
+    <div class="mt-1">
+      <PrioritySeg
+        value={t.priority}
+        testIdPrefix="quick-peek-prio"
+        onChange={(p) => setField({ priority: p })}
+      />
     </div>
 
     <div class="mt-3 text-[10px] uppercase tracking-wide text-dim">Labels</div>

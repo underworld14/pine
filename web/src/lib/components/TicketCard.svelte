@@ -25,7 +25,7 @@
     data-flash={flash}
   >
     <div class="row">
-      <span class="prio" style="color: {pm.color}" title={pm.label}>{pm.glyph}</span>
+      <span class="prio" style="color: {pm.color}" aria-label={pm.label}>{pm.short}</span>
       <span class="mono id">{ticket.id}</span>
       {#if ticket.blocked}
         <span class="lock" title="Blocked by {ticket.unmet?.length ?? ''} unmet dependencies">🔒</span>
@@ -95,7 +95,7 @@
     color: var(--color-dim);
   }
   .row { display: flex; align-items: center; gap: 6px; }
-  .prio { font-size: 10px; }
+  .prio { font-size: 10px; font-weight: 650; letter-spacing: 0.02em; }
   .id { font-size: 11px; color: var(--color-dim); }
   .lock { font-size: 11px; }
   .spacer { flex: 1; }
