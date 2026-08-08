@@ -383,9 +383,9 @@ separate so a ticket ID can never be mistaken for a subcommand.
 `--dry-run` renders the exact command and the full prompt and executes
 nothing. This is what makes the feature auditable before it is trusted.
 
-`pine list` and `pine ready` gain `--assignee` and `--unassigned`;
-`pine ready --agent <name>` is the agent-facing entry point, and
-`pine ready --unassigned` is the triage pile of discovered work.
+`pine list` and `pine ready` gain `--assignee` and `--unassigned`. One concept
+gets one flag name: `pine ready --assignee <name>` is the agent-facing entry
+point, and `pine ready --unassigned` is the triage pile of discovered work.
 
 ### `pine config`
 
