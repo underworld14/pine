@@ -31,6 +31,16 @@ The login button does nothing on click.
 2. Click "Sign in"
 `
 
+func TestTicketPrefix(t *testing.T) {
+	t.Parallel()
+	if (&Ticket{ID: "BUG-001"}).Prefix() != "BUG" {
+		t.Fatal("BUG")
+	}
+	if (&Ticket{ID: "bad"}).Prefix() != "" {
+		t.Fatal("malformed")
+	}
+}
+
 func TestParseCanonical(t *testing.T) {
 	tk := Parse("BUG-001", []byte(canonical))
 	if tk.Degraded {

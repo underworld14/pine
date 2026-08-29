@@ -2,6 +2,8 @@ module github.com/underworld14/pine
 
 go 1.26.4
 
+toolchain go1.27.0
+
 require (
 	github.com/blevesearch/bleve/v2 v2.6.0
 	github.com/charmbracelet/huh v1.0.0

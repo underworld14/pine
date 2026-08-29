@@ -49,6 +49,27 @@ func TestFormatPrettyTicket(t *testing.T) {
 	if !strings.Contains(phased, "[p2]") || !strings.Contains(phased, "Phased") {
 		t.Fatalf("phase badge missing: %q", phased)
 	}
+
+	testing := formatPrettyTicket(view.Ticket{ID: "FEAT-t", Status: "testing"})
+	if !strings.HasPrefix(testing, "◑ ") {
+		t.Fatalf("testing icon: %q", testing)
+	}
+	unknown := formatPrettyTicket(view.Ticket{ID: "FEAT-u", Status: "weird"})
+	if !strings.HasPrefix(unknown, "○ ") {
+		t.Fatalf("unknown status icon: %q", unknown)
+	}
+	cycle := formatPrettyTicket(view.Ticket{ID: "A", InCycle: true})
+	if !strings.Contains(cycle, "🔒 cycle") {
+		t.Fatalf("cycle: %q", cycle)
+	}
+	many := formatPrettyTicket(view.Ticket{ID: "B", Unmet: []string{"1", "2", "3", "4"}})
+	if !strings.Contains(many, "🔒 4 unmet") {
+		t.Fatalf("many unmet: %q", many)
+	}
+	dang := formatPrettyTicket(view.Ticket{ID: "C", Dangling: []string{"x", "y"}})
+	if !strings.Contains(dang, "⚠ 2 dangling") {
+		t.Fatalf("dangling: %q", dang)
+	}
 }
 
 func TestBuildTicketTree(t *testing.T) {

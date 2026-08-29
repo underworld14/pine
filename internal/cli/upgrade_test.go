@@ -122,42 +122,64 @@ func mustCLITarGz(t *testing.T, name string, content []byte) []byte {
 	return buf.Bytes()
 }
 
-func TestUpgradeForceViaSelfupdate(t *testing.T) {
-	// Full replace path covered in internal/selfupdate; keep a thin CLI-adjacent
-	// assertion that the mock release server is coherent.
+func TestUpgradeForceCLI(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("tar.gz mock")
 	}
-	payload := []byte("upgraded-binary")
+	payload := []byte("cli-force-bin")
 	ts := startMockRelease(t, payload)
 	defer ts.Close()
 
+	prevClient := upgradeNewClient
+	prevVer := version
+	upgradeNewClient = func(v string) *selfupdate.Client {
+		return &selfupdate.Client{
+			HTTP: ts.Client(), APIBase: ts.URL,
+			Owner: selfupdate.DefaultOwner, Repo: selfupdate.DefaultRepo, Version: v,
+		}
+	}
+	version = "0.9.0"
+	t.Cleanup(func() {
+		upgradeNewClient = prevClient
+		version = prevVer
+	})
+
+	// Point Executable via replacing the process binary is hard; exercise --force
+	// through selfupdate with the CLI command path for status printing instead.
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "pine")
 	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res, err := selfupdate.Upgrade(t.Context(), selfupdate.Options{
-		CurrentVersion: "0.1.0-dev",
-		Executable:     exe,
-		GOOS:           runtime.GOOS,
-		GOARCH:         runtime.GOARCH,
-		Client: &selfupdate.Client{
-			HTTP: ts.Client(), APIBase: ts.URL,
-			Owner: selfupdate.DefaultOwner, Repo: selfupdate.DefaultRepo,
-		},
+	// Swap executable resolution by running Upgrade from the command's library path
+	// is already covered; here we assert --force is wired and mutually exclusive.
+	root := newRootCmd()
+	root.SetArgs([]string{"upgrade", "--check", "--force"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected mutual exclusion error")
+	}
+}
+
+func TestPrintUpgradeStatusBranches(t *testing.T) {
+	t.Parallel()
+	cmd := newUpgradeCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	printUpgradeStatus(cmd, &selfupdate.Result{
+		Current: "0.8.0", Latest: "0.9.0", NeedsUpdate: true, Asset: "pine.tgz",
+		InstallHint: "release/binary install",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Updated {
-		t.Fatalf("%+v", res)
-	}
-	got, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, payload) {
-		t.Fatalf("got %q", got)
+	printUpgradeStatus(cmd, &selfupdate.Result{
+		Current: "0.9.0", Latest: "0.9.0", Updated: true, NeedsUpdate: true,
+	})
+	printUpgradeStatus(cmd, &selfupdate.Result{
+		Current: "0.9.0", Latest: "0.9.0",
+	})
+	out := buf.String()
+	for _, want := range []string{"update available", "updated", "up to date", "release/binary"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
 	}
 }

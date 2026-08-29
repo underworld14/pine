@@ -267,6 +267,9 @@ func TestNullClientAndShortHash(t *testing.T) {
 	if n.Log(ctx, "", "", 1) != nil {
 		t.Fatal("Log")
 	}
+	if n.CommitBefore(ctx, time.Now()) != "" || n.DiffStat(ctx, "HEAD") != "" {
+		t.Fatal("CommitBefore/DiffStat")
+	}
 	if shortHash("abcd") != "abcd" {
 		t.Fatal("short")
 	}

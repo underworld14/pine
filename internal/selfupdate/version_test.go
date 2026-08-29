@@ -18,6 +18,10 @@ func TestNeedsUpgrade(t *testing.T) {
 		{"0.7.1", "", false},
 		{"0.7", "0.7.1", true},
 		{"1.0.0", "1.0.0", false},
+		{"1.2.3-rc.1", "1.2.3", true},  // pre-release current is not release semver → upgrade
+		{"1.2.3", "1.2.3-rc.1", false}, // non-semver latest → no upgrade
+		{"1", "1.0.0", true},           // too few parts → treat current as non-release
+		{"1.2.3.4", "1.2.4", true},
 	}
 	for _, tc := range cases {
 		if got := NeedsUpgrade(tc.cur, tc.lat); got != tc.want {
