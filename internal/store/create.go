@@ -27,6 +27,7 @@ type CreateReq struct {
 	Labels   []string
 	Deps     []string
 	Parent   string
+	Phase    string
 	Links    []string
 	Status   string
 	Body     string
@@ -73,6 +74,7 @@ func (s *Store) Create(req CreateReq) (*ticket.Ticket, error) {
 		Labels:   req.Labels,
 		Deps:     req.Deps,
 		Parent:   req.Parent,
+		Phase:    req.Phase,
 		Links:    req.Links,
 		Created:  now,
 		Updated:  now,

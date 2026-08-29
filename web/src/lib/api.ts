@@ -28,6 +28,7 @@ export interface Ticket {
   labels: string[];
   deps: string[];
   parent?: string;
+  phase?: string;
   links?: string[];
   created: string;
   updated: string;

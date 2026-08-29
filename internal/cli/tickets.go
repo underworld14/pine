@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/underworld14/pine/internal/store"
@@ -18,32 +18,27 @@ import (
 
 func newListCmd() *cobra.Command {
 	var (
-		status, typ, label, parent string
-		onlyBlocked, onlyReady     bool
-		asJSON, flat               bool
+		status, typ, label, parent, phase string
+		onlyBlocked, onlyReady            bool
+		asJSON                            bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets (filterable), with dependency state",
 		Long: `List tickets with dependency state.
 
-By default, tickets are shown as a hierarchical tree (epic → children),
-Beads-style. Use --flat for the classic ID/STATUS/PRI table.`,
+Tickets are shown as a hierarchical tree (epic → children), Beads-style.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			views := collectViews(s, store.Filter{Status: status, Type: typ, Label: label, Parent: parent}, onlyBlocked, onlyReady)
+			views := collectViews(s, store.Filter{Status: status, Type: typ, Label: label, Parent: parent, Phase: phase}, onlyBlocked, onlyReady)
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), views)
 			}
-			if flat {
-				renderTicketTable(cmd.OutOrStdout(), views)
-			} else {
-				renderTicketTree(cmd.OutOrStdout(), views)
-			}
+			renderTicketTree(cmd.OutOrStdout(), views)
 			return nil
 		},
 	}
@@ -52,9 +47,9 @@ Beads-style. Use --flat for the classic ID/STATUS/PRI table.`,
 	f.StringVar(&typ, "type", "", "filter by type prefix (BUG, FEAT, EPIC)")
 	f.StringVar(&label, "label", "", "filter by label")
 	f.StringVar(&parent, "parent", "", "filter by epic parent id")
+	f.StringVar(&phase, "phase", "", "filter by phase (e.g. p0, p1)")
 	f.BoolVar(&onlyBlocked, "blocked", false, "only blocked tickets")
 	f.BoolVar(&onlyReady, "ready", false, "only ready (unblocked, open) tickets")
-	f.BoolVar(&flat, "flat", false, "classic table instead of hierarchical tree")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
 }
@@ -66,21 +61,26 @@ func newReadyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ready",
 		Short: "List actionable tickets: open and unblocked, most urgent first",
-		Args:  cobra.NoArgs,
+		Long: `List actionable tickets (open and unblocked), most urgent first.
+
+Text output is an epic → children tree. Parent epics that are not themselves
+ready are still shown as headers so ready children stay nested. JSON is the
+ready set only (no injected epic headers).`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			views := collectViews(s, store.Filter{}, false, true)
+			ready := collectViews(s, store.Filter{}, false, true)
 			if asJSON {
-				return writeJSON(cmd.OutOrStdout(), views)
+				return writeJSON(cmd.OutOrStdout(), ready)
 			}
-			if len(views) == 0 {
+			if len(ready) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "Nothing ready — every open ticket is blocked or there are none.")
 				return nil
 			}
-			renderTicketTable(cmd.OutOrStdout(), views)
+			renderTicketTree(cmd.OutOrStdout(), withEpicContext(s, ready))
 			return nil
 		},
 	}
@@ -122,9 +122,9 @@ func newShowCmd() *cobra.Command {
 
 func newCreateCmd() *cobra.Command {
 	var (
-		typ, title, priority, parent, status, bodyFile string
-		labels, deps                                   []string
-		asJSON                                         bool
+		typ, title, priority, parent, phase, status, bodyFile string
+		labels, deps                                          []string
+		asJSON                                                bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -146,6 +146,7 @@ func newCreateCmd() *cobra.Command {
 				Labels:   labels,
 				Deps:     normalizeIDs(deps),
 				Parent:   normalizeID(parent),
+				Phase:    phase,
 				Status:   status,
 				Body:     body,
 			})
@@ -166,6 +167,7 @@ func newCreateCmd() *cobra.Command {
 	f.StringSliceVarP(&labels, "label", "l", nil, "labels (repeatable or comma-separated)")
 	f.StringSliceVar(&deps, "deps", nil, "dependency ticket ids (blocked until they are done)")
 	f.StringVar(&parent, "parent", "", "epic ticket id this belongs to")
+	f.StringVar(&phase, "phase", "", "optional phase (e.g. p0, p1, p2)")
 	f.StringVar(&status, "status", "", "initial status (defaults to first board column)")
 	f.StringVar(&bodyFile, "body-file", "", "read the body from a file, or '-' for stdin")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
@@ -178,8 +180,8 @@ func newCreateCmd() *cobra.Command {
 
 func newUpdateCmd() *cobra.Command {
 	var (
-		status, title, priority, parent string
-		addLabels, rmLabels             []string
+		status, title, priority, parent, phase string
+		addLabels, rmLabels                    []string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <ID>",
@@ -209,6 +211,13 @@ func newUpdateCmd() *cobra.Command {
 						u.Parent = normalizeID(parent)
 					}
 				}
+				if flags.Changed("phase") {
+					if strings.EqualFold(phase, "none") {
+						u.Phase = ""
+					} else {
+						u.Phase = phase
+					}
+				}
 				u.Labels = applyLabelEdits(u.Labels, addLabels, rmLabels)
 				return nil
 			})
@@ -224,6 +233,7 @@ func newUpdateCmd() *cobra.Command {
 	f.StringVar(&title, "title", "", "new title")
 	f.StringVarP(&priority, "priority", "p", "", "new priority")
 	f.StringVar(&parent, "parent", "", "new epic parent id, or 'none' to clear")
+	f.StringVar(&phase, "phase", "", "new phase (e.g. p0, p1), or 'none' to clear")
 	f.StringSliceVar(&addLabels, "add-label", nil, "labels to add")
 	f.StringSliceVar(&rmLabels, "rm-label", nil, "labels to remove")
 	return cmd
@@ -301,22 +311,60 @@ func collectViews(s *store.Store, filter store.Filter, onlyBlocked, onlyReady bo
 	return out
 }
 
-func renderTicketTable(w io.Writer, views []view.Ticket) {
+// withEpicContext injects parent epic views that are missing from views so
+// ready children can nest under their epic in tree output. JSON callers should
+// pass the ready set without this helper.
+func withEpicContext(s *store.Store, views []view.Ticket) []view.Ticket {
 	if len(views) == 0 {
-		fmt.Fprintln(w, "No tickets.")
-		return
+		return views
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tPRI\tTITLE\tDEPS")
+	byID := make(map[string]struct{}, len(views))
 	for _, v := range views {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", v.ID, v.Status, v.Priority, truncate(v.Title, 48), depSummary(v))
+		byID[v.ID] = struct{}{}
 	}
-	tw.Flush()
+	g := s.Graph()
+	var extra []view.Ticket
+	seen := map[string]bool{}
+	for _, v := range views {
+		if v.Parent == "" || seen[v.Parent] {
+			continue
+		}
+		seen[v.Parent] = true
+		if _, ok := byID[v.Parent]; ok {
+			continue
+		}
+		t, err := s.Get(v.Parent)
+		if err != nil {
+			continue
+		}
+		extra = append(extra, view.Build(s, g, t, false))
+	}
+	if len(extra) == 0 {
+		return views
+	}
+	out := append(append([]view.Ticket(nil), views...), extra...)
+	sortViewsByPriorityThenUpdated(s, out)
+	return out
+}
+
+func sortViewsByPriorityThenUpdated(s *store.Store, views []view.Ticket) {
+	prios := s.Config().Priorities
+	sort.SliceStable(views, func(i, j int) bool {
+		ri := ticket.PriorityRank(views[i].Priority, prios)
+		rj := ticket.PriorityRank(views[j].Priority, prios)
+		if ri != rj {
+			return ri > rj
+		}
+		return views[i].Updated > views[j].Updated
+	})
 }
 
 func renderTicketDetail(w io.Writer, v view.Ticket) {
 	fmt.Fprintf(w, "%s  %s\n", v.ID, v.Title)
 	fmt.Fprintf(w, "status: %s   priority: %s", v.Status, v.Priority)
+	if v.Phase != "" {
+		fmt.Fprintf(w, "   phase: %s", v.Phase)
+	}
 	if len(v.Labels) > 0 {
 		fmt.Fprintf(w, "   labels: %s", strings.Join(v.Labels, ", "))
 	}

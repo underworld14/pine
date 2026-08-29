@@ -56,6 +56,25 @@ This gives you the full CLI, HTTP API, and live sync. (The bundled web UI ships
 in the release binaries and `make build` only; a `go install` build serves a
 small placeholder page in place of the UI.)
 
+### Upgrade in place
+
+Once `pine` is on your `PATH` (release download or `go install`), update to the
+latest GitHub release binary (full embedded UI):
+
+```sh
+pine upgrade --check   # current vs latest; exit 1 if an update is available
+pine upgrade           # download, verify checksums, replace this binary
+pine upgrade --force   # reinstall latest even if versions already match
+```
+
+`pine upgrade` always installs the official release archive over the current
+executable, so a `go install` build is upgraded to the release binary. Optional
+`GITHUB_TOKEN` / `GH_TOKEN` raises GitHub API rate limits. After upgrading,
+run a new `pine` process to pick up the new binary (on Windows a
+`pine.exe.old` leftover may remain until the upgrading process exits).
+
+(`pine update` is unrelated — it edits ticket fields.)
+
 ### Build from source
 
 Requires **Go 1.26+** and **Node 20+**.
@@ -95,9 +114,8 @@ pine create --type feature --title "Login form" --parent EPIC-001 -p high
 pine create --type bug --title "Button dead" --parent EPIC-001 --deps FEAT-001
 
 pine list                      # epic → children tree (Beads-style)
-pine list --flat               # classic ID/STATUS/PRI table
 pine list --blocked            # tickets waiting on dependencies (🔒)
-pine ready                     # actionable work: open and unblocked, most urgent first
+pine ready                     # actionable work as epic → children tree (open + unblocked)
 pine dep tree BUG-001          # dependency tree
 pine close FEAT-001            # → BUG-001 becomes ready
 pine show EPIC-001             # epic with child progress (1/2 done)

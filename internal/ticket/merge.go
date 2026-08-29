@@ -7,7 +7,7 @@ import "time"
 // valid merged ticket; conflict reports whether human review is warranted.
 //
 // Merge policy:
-//   - Scalars (title/status/priority/parent): if only one side changed, take it;
+//   - Scalars (title/status/priority/parent/phase): if only one side changed, take it;
 //     if both changed differently, the side with the newer Updated wins and the
 //     divergence is flagged as a conflict (the file stays valid — git marks it
 //     unmerged so the chosen value can be reviewed).
@@ -35,6 +35,8 @@ func Merge3(base, ours, theirs *Ticket) (*Ticket, bool) {
 	m.Priority, c = mergeScalar(b.Priority, ours.Priority, theirs.Priority, ours.Updated, theirs.Updated)
 	conflict = conflict || c
 	m.Parent, c = mergeScalar(b.Parent, ours.Parent, theirs.Parent, ours.Updated, theirs.Updated)
+	conflict = conflict || c
+	m.Phase, c = mergeScalar(b.Phase, ours.Phase, theirs.Phase, ours.Updated, theirs.Updated)
 	conflict = conflict || c
 	m.Order, c = mergeFloat(b.Order, ours.Order, theirs.Order, ours.Updated, theirs.Updated)
 	conflict = conflict || c

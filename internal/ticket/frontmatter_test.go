@@ -60,6 +60,36 @@ func TestParseCanonical(t *testing.T) {
 	}
 }
 
+func TestPhaseRoundTrip(t *testing.T) {
+	src := `---
+id: FEAT-010
+title: Phased work
+status: todo
+priority: high
+phase: p0
+created: 2026-07-04T00:00:00Z
+updated: 2026-07-04T00:00:00Z
+---
+body
+`
+	tk := Parse("FEAT-010", []byte(src))
+	if tk.Degraded {
+		t.Fatalf("unexpected degraded: %v", tk.Warnings)
+	}
+	if tk.Phase != "p0" {
+		t.Fatalf("phase = %q", tk.Phase)
+	}
+	out := string(tk.Serialize())
+	if !strings.Contains(out, "phase: p0\n") {
+		t.Fatalf("serialize missing phase:\n%s", out)
+	}
+	tk.Phase = ""
+	cleared := string(tk.Serialize())
+	if strings.Contains(cleared, "phase:") {
+		t.Fatalf("empty phase should be omitted:\n%s", cleared)
+	}
+}
+
 func TestRoundTripBodyByteIdentical(t *testing.T) {
 	tk := Parse("BUG-001", []byte(canonical))
 	out := tk.Serialize()

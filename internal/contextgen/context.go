@@ -190,7 +190,7 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 
 	// Conventions — the part that teaches agents to write back.
 	b.WriteString("## Conventions\n")
-	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, links.\n")
+	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, phase, links.\n")
 	fmt.Fprintf(&b, "- Move a ticket by editing its `status` (board columns: %s).\n", strings.Join(s.Board().Statuses(), ", "))
 	b.WriteString("- `deps` lists ticket IDs that block this one; a ticket is ready when every dep is `done`.\n")
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")

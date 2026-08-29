@@ -203,6 +203,7 @@ type Filter struct {
 	Type   string // ID prefix, e.g. "BUG"
 	Label  string
 	Parent string
+	Phase  string
 }
 
 func (f Filter) matches(t *ticket.Ticket) bool {
@@ -213,6 +214,9 @@ func (f Filter) matches(t *ticket.Ticket) bool {
 		return false
 	}
 	if f.Parent != "" && t.Parent != f.Parent {
+		return false
+	}
+	if f.Phase != "" && t.Phase != f.Phase {
 		return false
 	}
 	if f.Label != "" {

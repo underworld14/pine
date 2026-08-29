@@ -19,6 +19,7 @@ func (srv *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		Type:   q.Get("type"),
 		Label:  q.Get("label"),
 		Parent: q.Get("parent"),
+		Phase:  q.Get("phase"),
 	}
 	g := st.Graph()
 	ts := st.List(f)
@@ -41,6 +42,7 @@ type createBody struct {
 	Labels   []string `json:"labels"`
 	Deps     []string `json:"deps"`
 	Parent   string   `json:"parent"`
+	Phase    string   `json:"phase"`
 	Links    []string `json:"links"`
 	Status   string   `json:"status"`
 	Body     string   `json:"body"`
@@ -61,6 +63,7 @@ func (srv *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Labels:   b.Labels,
 		Deps:     b.Deps,
 		Parent:   b.Parent,
+		Phase:    b.Phase,
 		Links:    b.Links,
 		Status:   b.Status,
 		Body:     b.Body,
@@ -101,6 +104,7 @@ type ticketPatch struct {
 	Labels   *[]string `json:"labels"`
 	Deps     *[]string `json:"deps"`
 	Parent   *string   `json:"parent"`
+	Phase    *string   `json:"phase"`
 	Links    *[]string `json:"links"`
 	Body     *string   `json:"body"`
 	OpID     string    `json:"opId"`
@@ -144,6 +148,9 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Parent != nil {
 			u.Parent = *p.Parent
+		}
+		if p.Phase != nil {
+			u.Phase = *p.Phase
 		}
 		if p.Links != nil {
 			u.Links = *p.Links

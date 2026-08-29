@@ -42,6 +42,13 @@ func TestFormatPrettyTicket(t *testing.T) {
 	if strings.Contains(done, "[epic]") || strings.Contains(done, "[bug]") {
 		t.Fatalf("feature should not have type badge: %q", done)
 	}
+
+	phased := formatPrettyTicket(view.Ticket{
+		ID: "FEAT-003", Type: "FEAT", Title: "Phased", Status: "doing", Priority: "high", Phase: "p2",
+	})
+	if !strings.Contains(phased, "[p2]") || !strings.Contains(phased, "Phased") {
+		t.Fatalf("phase badge missing: %q", phased)
+	}
 }
 
 func TestBuildTicketTree(t *testing.T) {

@@ -1,7 +1,8 @@
 // Package cli implements Pine's cobra command tree: init, serve, the Beads-style
-// ticket commands (list/show/create/update/close/dep/ready/log), learn
-// (capture/list/search/show/supersede/rm persistent learnings), and the AI
-// helpers (context/prompt/export/doctor/optimize).
+// ticket commands (list/show/create/update/close/dep/ready/log), upgrade
+// (self-update from GitHub Releases), learn (capture/list/search/show/
+// supersede/rm persistent learnings), and the AI helpers
+// (context/prompt/export/doctor/optimize).
 package cli
 
 import (
@@ -27,6 +28,10 @@ func Execute(v string) {
 	version = v
 	root := newRootCmd()
 	if err := root.Execute(); err != nil {
+		if errors.Is(err, errUpdateAvailable) {
+			// Status already printed to stdout by `pine upgrade --check`.
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "pine: "+err.Error())
 		os.Exit(1)
 	}
@@ -51,6 +56,7 @@ func newRootCmd() *cobra.Command {
 		newShowCmd(),
 		newCreateCmd(),
 		newUpdateCmd(),
+		newUpgradeCmd(),
 		newCloseCmd(),
 		newDepCmd(),
 		newReadyCmd(),

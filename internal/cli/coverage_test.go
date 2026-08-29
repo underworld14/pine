@@ -139,12 +139,8 @@ func TestListShowReadyTextOutput(t *testing.T) {
 		t.Fatalf("list tree missing nest connectors:\n%s", listOut)
 	}
 
-	flatOut, err := run(t, dir, "list", "--flat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(flatOut, "BUG-001") || !strings.Contains(flatOut, "STATUS") {
-		t.Fatalf("list --flat missing table:\n%s", flatOut)
+	if _, err := run(t, dir, "list", "--flat"); err == nil {
+		t.Fatal("list --flat should be removed")
 	}
 
 	showOut, err := run(t, dir, "show", "BUG-001")
@@ -172,6 +168,89 @@ func TestListShowReadyTextOutput(t *testing.T) {
 	}
 	if strings.Contains(readyNonEmpty, "BUG-001") {
 		t.Fatalf("BUG-001 should still be blocked:\n%s", readyNonEmpty)
+	}
+	// Ready text is a tree (not the old flat table).
+	if strings.Contains(readyNonEmpty, "STATUS\tPRI") || strings.Contains(readyNonEmpty, "ID\tSTATUS") {
+		t.Fatalf("ready should not use flat table headers:\n%s", readyNonEmpty)
+	}
+}
+
+func TestReadyTreeInjectsBlockedEpicParent(t *testing.T) {
+	dir := initRepo(t)
+
+	run(t, dir, "create", "--type", "feature", "--title", "blocker") // FEAT-001
+	run(t, dir, "create", "--type", "epic", "--title", "Blocked epic", "--deps", "FEAT-001") // EPIC-001
+	run(t, dir, "create", "--type", "feature", "--title", "Ready child", "--parent", "EPIC-001", "-p", "high") // FEAT-002
+
+	readyOut, err := run(t, dir, "ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readyOut, "EPIC-001") {
+		t.Fatalf("ready tree should show blocked epic as context header:\n%s", readyOut)
+	}
+	if !strings.Contains(readyOut, "FEAT-002") {
+		t.Fatalf("ready tree missing ready child:\n%s", readyOut)
+	}
+	if !strings.Contains(readyOut, "├──") && !strings.Contains(readyOut, "└──") {
+		t.Fatalf("ready tree missing nest connectors under epic:\n%s", readyOut)
+	}
+
+	jsonOut, err := run(t, dir, "ready", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(jsonOut, `"id": "EPIC-001"`) {
+		t.Fatalf("ready --json must not inject non-ready epic:\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"id": "FEAT-002"`) {
+		t.Fatalf("ready --json missing ready child:\n%s", jsonOut)
+	}
+}
+
+func TestPhaseCreateUpdateListShow(t *testing.T) {
+	dir := initRepo(t)
+
+	createOut, err := run(t, dir, "create", "--type", "feature", "--title", "Phase work", "--phase", "p1", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(createOut, `"phase": "p1"`) {
+		t.Fatalf("create --json missing phase:\n%s", createOut)
+	}
+
+	listOut, err := run(t, dir, "list", "--phase", "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listOut, "FEAT-001") || !strings.Contains(listOut, "[p1]") {
+		t.Fatalf("list --phase p1 missing ticket/badge:\n%s", listOut)
+	}
+	emptyPhase, err := run(t, dir, "list", "--phase", "p9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(emptyPhase, "FEAT-001") {
+		t.Fatalf("list --phase p9 should not match FEAT-001:\n%s", emptyPhase)
+	}
+
+	showOut, err := run(t, dir, "show", "FEAT-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(showOut, "phase: p1") {
+		t.Fatalf("show missing phase:\n%s", showOut)
+	}
+
+	if _, err := run(t, dir, "update", "FEAT-001", "--phase", "none"); err != nil {
+		t.Fatal(err)
+	}
+	showCleared, err := run(t, dir, "show", "FEAT-001", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(showCleared, `"phase"`) {
+		t.Fatalf("phase should be cleared/omitted after update --phase none:\n%s", showCleared)
 	}
 }
 

@@ -178,6 +178,9 @@ func overlayMatches(f store.Filter, v view.Ticket) bool {
 	if f.Parent != "" && v.Parent != f.Parent {
 		return false
 	}
+	if f.Phase != "" && v.Phase != f.Phase {
+		return false
+	}
 	if f.Label != "" {
 		found := false
 		for _, l := range v.Labels {

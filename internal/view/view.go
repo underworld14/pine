@@ -22,6 +22,7 @@ type Ticket struct {
 	Labels   []string `json:"labels"`
 	Deps     []string `json:"deps"`
 	Parent   string   `json:"parent,omitempty"`
+	Phase    string   `json:"phase,omitempty"`
 	Links    []string `json:"links,omitempty"`
 	Created  string   `json:"created"`
 	Updated  string   `json:"updated"`
@@ -76,6 +77,7 @@ func Build(s *store.Store, g *ticket.Graph, t *ticket.Ticket, includeBody bool) 
 		Labels:      nonNil(t.Labels),
 		Deps:        nonNil(t.Deps),
 		Parent:      t.Parent,
+		Phase:       t.Phase,
 		Links:       nonNil(t.Links),
 		Created:     fmtTime(t.Created),
 		Updated:     fmtTime(t.Updated),
@@ -119,6 +121,7 @@ func BuildOffBranch(t *ticket.Ticket, branch string, includeBody bool) Ticket {
 		Labels:      nonNil(t.Labels),
 		Deps:        nonNil(t.Deps),
 		Parent:      t.Parent,
+		Phase:       t.Phase,
 		Links:       nonNil(t.Links),
 		Created:     fmtTime(t.Created),
 		Updated:     fmtTime(t.Updated),

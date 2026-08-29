@@ -45,6 +45,11 @@ func formatPrettyTicket(v view.Ticket) string {
 	case "BUG":
 		b.WriteString(" [bug]")
 	}
+	if v.Phase != "" {
+		b.WriteString(" [")
+		b.WriteString(v.Phase)
+		b.WriteByte(']')
+	}
 	if v.Title != "" {
 		b.WriteByte(' ')
 		b.WriteString(v.Title)
