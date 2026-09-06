@@ -154,6 +154,155 @@ func TestCreateListJSON(t *testing.T) {
 	}
 }
 
+func TestListHidesDoneByDefault(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "Open bug")  // BUG-001
+	run(t, dir, "create", "--type", "bug", "--title", "Done bug")  // BUG-002
+	if _, err := run(t, dir, "close", "BUG-002"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "BUG-001") {
+		t.Fatalf("default list should show open ticket:\n%s", out)
+	}
+	if strings.Contains(out, "BUG-002") {
+		t.Fatalf("default list should hide done ticket:\n%s", out)
+	}
+
+	jsonOut, err := run(t, dir, "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var views []view.Ticket
+	if err := json.Unmarshal([]byte(jsonOut), &views); err != nil {
+		t.Fatalf("list --json: %v\n%s", err, jsonOut)
+	}
+	if len(views) != 1 || views[0].ID != "BUG-001" {
+		t.Fatalf("default list --json should be open only: %+v", views)
+	}
+
+	allOut, err := run(t, dir, "list", "--all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(allOut, "BUG-001") || !strings.Contains(allOut, "BUG-002") {
+		t.Fatalf("--all should include done:\n%s", allOut)
+	}
+
+	doneOut, err := run(t, dir, "list", "--status", "done", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var done []view.Ticket
+	if err := json.Unmarshal([]byte(doneOut), &done); err != nil {
+		t.Fatalf("list --status done: %v\n%s", err, doneOut)
+	}
+	if len(done) != 1 || done[0].ID != "BUG-002" {
+		t.Fatalf("--status done should show only closed: %+v", done)
+	}
+}
+
+func TestListAllDoneEmptyState(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "Only one")
+	if _, err := run(t, dir, "close", "BUG-001"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No open tickets. Use --all to include done.") {
+		t.Fatalf("all-done workspace should hint --all:\n%s", out)
+	}
+	if strings.Contains(out, "No tickets.") {
+		t.Fatalf("should not use the empty-workspace message:\n%s", out)
+	}
+
+	jsonOut, err := run(t, dir, "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var views []view.Ticket
+	if err := json.Unmarshal([]byte(jsonOut), &views); err != nil {
+		t.Fatalf("list --json: %v\n%s", err, jsonOut)
+	}
+	if len(views) != 0 {
+		t.Fatalf("all-done JSON should be empty: %+v", views)
+	}
+}
+
+func TestListFilterMissUsesGenericEmpty(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "feature", "--title", "Open feature")
+
+	out, err := run(t, dir, "list", "--type", "BUG")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No tickets.") {
+		t.Fatalf("type filter miss should use generic empty message:\n%s", out)
+	}
+	if strings.Contains(out, "Use --all") {
+		t.Fatalf("type filter miss must not hint --all when open tickets exist:\n%s", out)
+	}
+}
+
+func TestListDoneParentPromotesOpenChild(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "epic", "--title", "Done epic")                           // EPIC-001
+	run(t, dir, "create", "--type", "feature", "--title", "Open orphan", "--parent", "EPIC-001") // FEAT-001
+	if _, err := run(t, dir, "close", "EPIC-001"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "EPIC-001") {
+		t.Fatalf("done epic should be hidden (no parent injection):\n%s", out)
+	}
+	if !strings.Contains(out, "FEAT-001") {
+		t.Fatalf("open child of done epic should appear as a root:\n%s", out)
+	}
+	if strings.Contains(out, "├──") || strings.Contains(out, "└──") {
+		t.Fatalf("open child should not be nested under a hidden parent:\n%s", out)
+	}
+}
+
+func TestListHidesDoneChildrenKeepsEpicProgress(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "epic", "--title", "Parent epic")                          // EPIC-001
+	run(t, dir, "create", "--type", "feature", "--title", "Done child", "--parent", "EPIC-001") // FEAT-001
+	run(t, dir, "create", "--type", "feature", "--title", "Open child", "--parent", "EPIC-001") // FEAT-002
+	if _, err := run(t, dir, "close", "FEAT-001"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, dir, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "EPIC-001") {
+		t.Fatalf("open epic should remain as header:\n%s", out)
+	}
+	if !strings.Contains(out, "FEAT-002") {
+		t.Fatalf("open child should remain nested:\n%s", out)
+	}
+	if strings.Contains(out, "FEAT-001") {
+		t.Fatalf("done child should be hidden:\n%s", out)
+	}
+	if !strings.Contains(out, "(1/2)") {
+		t.Fatalf("epic progress should still count hidden done children:\n%s", out)
+	}
+}
+
 func TestDepsBlockingReadyAndClose(t *testing.T) {
 	dir := initRepo(t)
 	run(t, dir, "create", "--type", "feature", "--title", "dep") // FEAT-001

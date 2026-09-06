@@ -113,7 +113,8 @@ pine create --type epic --title "Auth system"
 pine create --type feature --title "Login form" --parent EPIC-001 -p high
 pine create --type bug --title "Button dead" --parent EPIC-001 --deps FEAT-001
 
-pine list                      # epic → children tree (Beads-style)
+pine list                      # open tickets as epic → children tree (Beads-style)
+pine list --all                # include done tickets
 pine list --blocked            # tickets waiting on dependencies (🔒)
 pine ready                     # actionable work as epic → children tree (open + unblocked)
 pine dep tree BUG-001          # dependency tree

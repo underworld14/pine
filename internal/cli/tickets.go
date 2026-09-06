@@ -19,24 +19,34 @@ import (
 func newListCmd() *cobra.Command {
 	var (
 		status, typ, label, parent, phase string
-		onlyBlocked, onlyReady            bool
+		onlyBlocked, onlyReady, showAll   bool
 		asJSON                            bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List tickets (filterable), with dependency state",
+		Short: "List open tickets (filterable); use --all for done",
 		Long: `List tickets with dependency state.
 
-Tickets are shown as a hierarchical tree (epic → children), Beads-style.`,
+By default, done tickets are hidden (Beads-style). Pass --all to include them,
+or --status done to list only closed tickets.
+
+Tickets are shown as a hierarchical tree (epic → children).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			views := collectViews(s, store.Filter{Status: status, Type: typ, Label: label, Parent: parent, Phase: phase}, onlyBlocked, onlyReady)
+			// Explicit --status overrides the default hide-done filter, matching
+			// Beads (bd list --status closed includes closed issues).
+			hideDone := !showAll && !cmd.Flags().Changed("status")
+			views := collectViews(s, store.Filter{Status: status, Type: typ, Label: label, Parent: parent, Phase: phase}, onlyBlocked, onlyReady, hideDone)
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), views)
+			}
+			if len(views) == 0 && hideDone && hasOnlyDoneTickets(s) {
+				fmt.Fprintln(cmd.OutOrStdout(), "No open tickets. Use --all to include done.")
+				return nil
 			}
 			renderTicketTree(cmd.OutOrStdout(), views)
 			return nil
@@ -50,6 +60,7 @@ Tickets are shown as a hierarchical tree (epic → children), Beads-style.`,
 	f.StringVar(&phase, "phase", "", "filter by phase (e.g. p0, p1)")
 	f.BoolVar(&onlyBlocked, "blocked", false, "only blocked tickets")
 	f.BoolVar(&onlyReady, "ready", false, "only ready (unblocked, open) tickets")
+	f.BoolVarP(&showAll, "all", "a", false, "include done tickets")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
 }
@@ -72,7 +83,7 @@ ready set only (no injected epic headers).`,
 			if err != nil {
 				return err
 			}
-			ready := collectViews(s, store.Filter{}, false, true)
+			ready := collectViews(s, store.Filter{}, false, true, false)
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), ready)
 			}
@@ -290,11 +301,14 @@ changed, suitable for review and audits.`,
 
 // --- shared helpers ---
 
-func collectViews(s *store.Store, filter store.Filter, onlyBlocked, onlyReady bool) []view.Ticket {
+func collectViews(s *store.Store, filter store.Filter, onlyBlocked, onlyReady, hideDone bool) []view.Ticket {
 	g := s.Graph()
 	tickets := s.List(filter)
 	var sel []*ticket.Ticket
 	for _, t := range tickets {
+		if hideDone && t.Status == ticket.StatusDone {
+			continue
+		}
 		if onlyBlocked && !g.Blocked(t.ID) {
 			continue
 		}
@@ -309,6 +323,23 @@ func collectViews(s *store.Store, filter store.Filter, onlyBlocked, onlyReady bo
 		out = append(out, view.Build(s, g, t, false))
 	}
 	return out
+}
+
+// hasOnlyDoneTickets reports whether the store has at least one ticket and every
+// ticket is done. Used so the list empty-state hint ("Use --all…") only appears
+// when hiding done would empty an otherwise all-closed board — not when other
+// filters (type/label/parent/…) simply match nothing.
+func hasOnlyDoneTickets(s *store.Store) bool {
+	all := s.All()
+	if len(all) == 0 {
+		return false
+	}
+	for _, t := range all {
+		if t.Status != ticket.StatusDone {
+			return false
+		}
+	}
+	return true
 }
 
 // withEpicContext injects parent epic views that are missing from views so
