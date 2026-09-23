@@ -48,7 +48,8 @@ Tickets are shown as a hierarchical tree (epic → children).`,
 				fmt.Fprintln(cmd.OutOrStdout(), "No open tickets. Use --all to include done.")
 				return nil
 			}
-			renderTicketTree(cmd.OutOrStdout(), views)
+			out := cmd.OutOrStdout()
+			renderTicketTreeWith(out, views, listStyleFor(out), s.Config().Priorities)
 			return nil
 		},
 	}
@@ -91,7 +92,8 @@ ready set only (no injected epic headers).`,
 				fmt.Fprintln(cmd.OutOrStdout(), "Nothing ready — every open ticket is blocked or there are none.")
 				return nil
 			}
-			renderTicketTree(cmd.OutOrStdout(), withEpicContext(s, ready))
+			out := cmd.OutOrStdout()
+			renderTicketTreeWith(out, withEpicContext(s, ready), listStyleFor(out), s.Config().Priorities)
 			return nil
 		},
 	}

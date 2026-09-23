@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/underworld14/pine/internal/ticket"
 	"github.com/underworld14/pine/internal/view"
 )
 
@@ -29,26 +30,27 @@ func statusIcon(v view.Ticket) string {
 }
 
 // formatPrettyTicket formats one ticket for tree list output.
-// Shape (Beads-inspired): ICON ID ● priority [type] Title (progress)  deps
+// Shape (Beads-inspired): ICON ID ● priority [type] [phase] Title (progress)  deps
 func formatPrettyTicket(v view.Ticket) string {
+	return formatPrettyTicketWith(v, listStyle{})
+}
+
+func formatPrettyTicketWith(v view.Ticket, sty listStyle) string {
 	var b strings.Builder
-	b.WriteString(statusIcon(v))
+	b.WriteString(sty.status(v))
 	b.WriteByte(' ')
 	b.WriteString(v.ID)
 	if v.Priority != "" {
-		b.WriteString(" ● ")
-		b.WriteString(v.Priority)
+		b.WriteByte(' ')
+		b.WriteString(sty.priority(v.Priority))
 	}
-	switch strings.ToUpper(v.Type) {
-	case "EPIC":
-		b.WriteString(" [epic]")
-	case "BUG":
-		b.WriteString(" [bug]")
+	if badge := sty.typeBadge(ticketTypePrefix(v)); badge != "" {
+		b.WriteByte(' ')
+		b.WriteString(badge)
 	}
 	if v.Phase != "" {
-		b.WriteString(" [")
-		b.WriteString(v.Phase)
-		b.WriteByte(']')
+		b.WriteByte(' ')
+		b.WriteString(sty.phase(v.Phase))
 	}
 	if v.Title != "" {
 		b.WriteByte(' ')
@@ -59,7 +61,7 @@ func formatPrettyTicket(v view.Ticket) string {
 	}
 	if ann := treeDepAnnotation(v); ann != "" {
 		b.WriteString("  ")
-		b.WriteString(ann)
+		b.WriteString(sty.depAnn(ann))
 	}
 	return b.String()
 }
@@ -92,7 +94,6 @@ func buildTicketTree(views []view.Ticket) (roots []view.Ticket, children map[str
 	children = make(map[string][]view.Ticket)
 	isChild := make(map[string]bool, len(views))
 
-	// Preserve list sort order (priority then updated) within each sibling group.
 	for _, v := range views {
 		if v.Parent == "" {
 			continue
@@ -113,21 +114,33 @@ func buildTicketTree(views []view.Ticket) (roots []view.Ticket, children map[str
 }
 
 func renderTicketTree(w io.Writer, views []view.Ticket) {
+	renderTicketTreeWith(w, views, listStyleFor(w), ticket.DefaultPriorities)
+}
+
+func renderTicketTreeWith(w io.Writer, views []view.Ticket, sty listStyle, prios []string) {
 	if len(views) == 0 {
 		fmt.Fprintln(w, "No tickets.")
 		return
 	}
+	if len(prios) == 0 {
+		prios = ticket.DefaultPriorities
+	}
 	roots, children := buildTicketTree(views)
+	sortTreeSiblings(roots, prios)
+	for parent, kids := range children {
+		sortTreeSiblings(kids, prios)
+		children[parent] = kids
+	}
 	for _, root := range roots {
-		fmt.Fprintln(w, formatPrettyTicket(root))
-		printTreeChildren(w, children, root.ID, "")
+		fmt.Fprintln(w, formatPrettyTicketWith(root, sty))
+		printTreeChildren(w, children, root.ID, "", sty)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%d tickets\n", len(views))
 	fmt.Fprintln(w, "Status: ○ todo  ◐ doing  ◑ testing  ● blocked  ✓ done")
 }
 
-func printTreeChildren(w io.Writer, children map[string][]view.Ticket, parentID, prefix string) {
+func printTreeChildren(w io.Writer, children map[string][]view.Ticket, parentID, prefix string, sty listStyle) {
 	kids := children[parentID]
 	for i, child := range kids {
 		last := i == len(kids)-1
@@ -135,11 +148,11 @@ func printTreeChildren(w io.Writer, children map[string][]view.Ticket, parentID,
 		if last {
 			connector = "└── "
 		}
-		fmt.Fprintf(w, "%s%s%s\n", prefix, connector, formatPrettyTicket(child))
+		fmt.Fprintf(w, "%s%s%s\n", sty.dim(prefix), sty.dim(connector), formatPrettyTicketWith(child, sty))
 		ext := "│   "
 		if last {
 			ext = "    "
 		}
-		printTreeChildren(w, children, child.ID, prefix+ext)
+		printTreeChildren(w, children, child.ID, prefix+ext, sty)
 	}
 }

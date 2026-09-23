@@ -39,8 +39,11 @@ func TestFormatPrettyTicket(t *testing.T) {
 	if !strings.HasPrefix(done, "✓ ") {
 		t.Fatalf("done ticket should start with ✓, got %q", done)
 	}
+	if !strings.Contains(done, "[feat]") {
+		t.Fatalf("feature should have type badge: %q", done)
+	}
 	if strings.Contains(done, "[epic]") || strings.Contains(done, "[bug]") {
-		t.Fatalf("feature should not have type badge: %q", done)
+		t.Fatalf("feature should not have other type badges: %q", done)
 	}
 
 	phased := formatPrettyTicket(view.Ticket{
@@ -118,10 +121,10 @@ func TestRenderTicketTree(t *testing.T) {
 	if !strings.Contains(out, "○ EPIC-1 ● high [epic] Epic (0/2)") {
 		t.Fatalf("missing epic root line:\n%s", out)
 	}
-	if !strings.Contains(out, "├── ◐ FEAT-a ● high First") {
+	if !strings.Contains(out, "├── ◐ FEAT-a ● high [feat] First") {
 		t.Fatalf("missing first child:\n%s", out)
 	}
-	if !strings.Contains(out, "└── ● FEAT-b ● medium Second  🔒 FEAT-a") {
+	if !strings.Contains(out, "└── ● FEAT-b ● medium [feat] Second  🔒 FEAT-a") {
 		t.Fatalf("missing last blocked child:\n%s", out)
 	}
 	if !strings.Contains(out, "3 tickets") {
