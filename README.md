@@ -134,23 +134,33 @@ stored, so agents editing files can't desync it.
 ### AI context
 
 ```sh
-pine context | pbcopy          # a full project briefing for your agent
-pine prompt BUG-001            # a fix-request prompt for one ticket
+pine context | pbcopy          # a compact project briefing for your agent (default)
+pine context --full            # the exhaustive briefing (every table, ACs, commits)
+pine prompt BUG-001            # a fix-request prompt (bugs) or implement prompt (features)
 pine export --format md        # all tickets as markdown (or --format json)
 ```
+
+`pine context` is **compact by default** — board counts, ready work, the
+tickets whose *Related Files* intersect your uncommitted changes (or whose ID a
+recent commit mentions), memory, and conventions — so dozens of done tickets no
+longer flood the agent's context window before work starts. `--full` restores
+the exhaustive layout.
 
 `pine context` includes a **Conventions** block that teaches the agent how to
 write back to `.pine/` (edit `status` to move a ticket, use `deps`/`parent`, run
 `pine ready`/`pine close`). It also surfaces **Your Preferences (global)**
 (`~/.pine/MEMORY.md`, see [Global memory](#global-memory)), **Project Memory**
 (`.pine/MEMORY.md`), ranked **memory topics** under `.pine/memory/`, and
-tip-resolved **Relevant Learnings** (`LRN-*`, usually ticket-scoped).
+tip-resolved **Relevant Learnings** (`LRN-*`, usually ticket-scoped). Memory
+bullets older than 90 days are marked `⚠ unverified since <date>` so an agent
+knows which lines predate recent refactors and should be re-probed.
 
 ```sh
 pine learn suggest "prefer query builder" --cites internal/store/query.go
 pine learn "Always use the query builder" --to MEMORY.md
 pine learn "Usage icons need text-white" --to memory/analytics.md --cites apps/web/.../x.ts
 pine learn "Fixed only here" --scope ticket --ticket BUG-014
+pine learn "gateway honors toolsets" --new-topic agent-api --evidence "probe: curl /api/toolsets"
 pine learn list                    # MEMORY/topics + LRN tips
 pine learn search "migration"
 pine learn show MEMORY.md
@@ -278,7 +288,7 @@ Everything lives in `.pine/` and is meant to be committed:
   attachments/
     BUG-001/login.webp  # optimized on ingest
   templates/            # bug.md, feature.md, epic.md
-  prompts/fix.md        # the pine prompt template
+  prompts/              # fix.md (bugs), implement.md (features)
   .gitignore            # optional: keep tickets/attachments local (see sync)
 ```
 
@@ -311,12 +321,17 @@ labels:
 deps:
   - FEAT-002
 parent: EPIC-001
+verify: grep -rn "renderLogin(" apps/web/src | grep -v _test
 created: 2026-07-04T10:12:00Z
 updated: 2026-07-04T11:00:00Z
 ---
 
 # Description
 ...
+
+# Related Files
+- apps/web/src/login/button.tsx — the dead onClick handler
+- apps/web/src/login/ — whole folder needs guard checks
 ```
 
 The **filename is the canonical id**; frontmatter `status` decides which board
@@ -324,7 +339,31 @@ column a ticket is in. Pine parses leniently — a malformed or agent-written fi
 is surfaced as a read-only "degraded" ticket rather than lost, and `pine doctor`
 reports every problem (schema errors, dangling deps, dependency cycles, broken
 attachment references, orphaned directories, stray files, dangling `supersedes`
-refs, and supersede cycles).
+refs, supersede cycles, and memory bullets that are undated or older than
+90 days).
+
+**Body sections.** Sections are `#`-level headings; the two Pine reads are
+`# Acceptance Criteria` (checkboxes drive progress counters) and
+`# Related Files`. A Related Files entry is a bullet whose first token is a
+repo-relative path — directories (with or without trailing `/`), backticks,
+and a leading `@` all work, and anything after the path is a free-form
+annotation that survives extraction. `pine context` uses these paths to decide
+which tickets are relevant to your current changes, and `pine prompt` lists
+them for the agent.
+
+**verify.** `verify:` in the frontmatter is a shell command proving the work is
+live in production code (a `grep` for callers, a smoke test). `pine close <ID>
+--evidence` runs it in the repo root before closing: pass → the ticket closes
+with a `## Verification` section; fail → the close is refused (pass `--force`
+to close anyway and record the failure). Set it with `pine create --verify` /
+`pine update --verify`, or let `pine prompt`'s implement template ask the agent
+to fill one in.
+
+**JSON.** `pine list|show|ready|create --json` emit the same ticket DTO the
+HTTP API uses: `id`, `type`, `title`, `status`, `priority`, `labels`, `deps`,
+`parent`, `phase`, `verify`, `links`, `created`, `updated`, computed
+`blocked`/`unmet`/`dangling`/`inCycle`, `epicProgress`, `acceptance`, `hash`,
+and (for `show`/`create`) the full `body`.
 
 A learning file:
 
