@@ -44,6 +44,7 @@ type Ticket struct {
 	Deps     []string  // ticket IDs this ticket is blocked by
 	Parent   string    // epic ticket ID, or "" when none
 	Phase    string    // optional rollout phase (convention: p0, p1, p2, …)
+	Verify   string    // shell command proving the work is live (run by pine close --evidence)
 	Links    []string  // typed graph refs (ticket / LRN-* / memory/<slug> / MEMORY)
 	Created  time.Time // zero when unparseable (store fills from mtime)
 	Updated  time.Time

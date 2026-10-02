@@ -37,12 +37,12 @@ func projectStore(s *store.Store) memStore {
 }
 
 // captureMemoryInsight routes a non-ticket insight into MEMORY.md or a topic file.
-func captureMemoryInsight(cmd *cobra.Command, ms memStore, text string, cites []string, component, to, newTopic string, asJSON bool) error {
+func captureMemoryInsight(cmd *cobra.Command, ms memStore, text string, cites []string, component, to, newTopic, evidence string, asJSON bool) error {
 	if err := memory.EnsureLayout(ms.Dir); err != nil {
 		return err
 	}
 
-	opts := memory.AppendOpts{Text: text, Cites: cites}
+	opts := memory.AppendOpts{Text: text, Cites: cites, Evidence: evidence}
 
 	if to != "" {
 		kind, value, err := memory.ResolveTo(to)

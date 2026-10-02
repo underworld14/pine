@@ -40,6 +40,38 @@ func TestEnsureLayoutAndAppendMEMORY(t *testing.T) {
 	}
 }
 
+func TestAppendTopicEvidenceAndParseBulletDate(t *testing.T) {
+	dir := t.TempDir()
+	pine := filepath.Join(dir, ".pine")
+	_ = os.MkdirAll(pine, 0o755)
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	if err := AppendTopic(pine, "agent-api", AppendOpts{
+		Text:     "platform_toolsets is honored by the gateway",
+		Evidence: "probe: curl /api/toolsets returned the merged set",
+		Now:      now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadTopic(pine, "agent-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Body, "(evidence: probe: curl /api/toolsets returned the merged set)") {
+		t.Fatalf("evidence missing from bullet:\n%s", got.Body)
+	}
+
+	d, ok := ParseBulletDate("- 2026-10-02: something (evidence: x)")
+	if !ok || !d.Equal(now) {
+		t.Fatalf("ParseBulletDate = %v, %v", d, ok)
+	}
+	if _, ok := ParseBulletDate("- platform_toolsets is ignored"); ok {
+		t.Fatal("undated bullet should not parse")
+	}
+	if _, ok := ParseBulletDate("## heading"); ok {
+		t.Fatal("non-bullet should not parse")
+	}
+}
+
 func TestAppendTopicCreatesAndAppends(t *testing.T) {
 	dir := t.TempDir()
 	pine := filepath.Join(dir, ".pine")

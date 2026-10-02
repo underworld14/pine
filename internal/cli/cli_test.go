@@ -49,7 +49,7 @@ func TestInitCreatesStructure(t *testing.T) {
 	dir := initRepo(t)
 	for _, p := range []string{
 		".pine/config.json", ".pine/board.json",
-		".pine/templates/bug.md", ".pine/prompts/fix.md",
+		".pine/templates/bug.md", ".pine/prompts/fix.md", ".pine/prompts/implement.md",
 		".pine/learnings",
 		".pine/.gitignore",
 	} {
@@ -156,8 +156,8 @@ func TestCreateListJSON(t *testing.T) {
 
 func TestListHidesDoneByDefault(t *testing.T) {
 	dir := initRepo(t)
-	run(t, dir, "create", "--type", "bug", "--title", "Open bug")  // BUG-001
-	run(t, dir, "create", "--type", "bug", "--title", "Done bug")  // BUG-002
+	run(t, dir, "create", "--type", "bug", "--title", "Open bug") // BUG-001
+	run(t, dir, "create", "--type", "bug", "--title", "Done bug") // BUG-002
 	if _, err := run(t, dir, "close", "BUG-002"); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestListFilterMissUsesGenericEmpty(t *testing.T) {
 
 func TestListDoneParentPromotesOpenChild(t *testing.T) {
 	dir := initRepo(t)
-	run(t, dir, "create", "--type", "epic", "--title", "Done epic")                           // EPIC-001
+	run(t, dir, "create", "--type", "epic", "--title", "Done epic")                              // EPIC-001
 	run(t, dir, "create", "--type", "feature", "--title", "Open orphan", "--parent", "EPIC-001") // FEAT-001
 	if _, err := run(t, dir, "close", "EPIC-001"); err != nil {
 		t.Fatal(err)
@@ -278,7 +278,7 @@ func TestListDoneParentPromotesOpenChild(t *testing.T) {
 
 func TestListHidesDoneChildrenKeepsEpicProgress(t *testing.T) {
 	dir := initRepo(t)
-	run(t, dir, "create", "--type", "epic", "--title", "Parent epic")                          // EPIC-001
+	run(t, dir, "create", "--type", "epic", "--title", "Parent epic")                           // EPIC-001
 	run(t, dir, "create", "--type", "feature", "--title", "Done child", "--parent", "EPIC-001") // FEAT-001
 	run(t, dir, "create", "--type", "feature", "--title", "Open child", "--parent", "EPIC-001") // FEAT-002
 	if _, err := run(t, dir, "close", "FEAT-001"); err != nil {
@@ -360,6 +360,98 @@ func TestUpdateFields(t *testing.T) {
 	}
 	if len(v.Labels) != 1 || v.Labels[0] != "two" {
 		t.Errorf("labels = %v", v.Labels)
+	}
+}
+
+func TestUpdateBodyFileAndDeps(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "feature", "--title", "dep target") // FEAT-001
+	run(t, dir, "create", "--type", "bug", "--title", "b")              // BUG-001
+
+	bodyPath := filepath.Join(dir, "body.md")
+	newBody := "# Description\n\nRewritten body.\n\n# Related Files\n- internal/cli/tickets.go\n"
+	if err := os.WriteFile(bodyPath, []byte(newBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "update", "BUG-001", "--body-file", bodyPath); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := run(t, dir, "show", "BUG-001", "--json")
+	var v view.Ticket
+	json.Unmarshal([]byte(out), &v)
+	if !strings.Contains(v.Body, "Rewritten body.") || !strings.Contains(v.Body, "# Related Files") {
+		t.Fatalf("body was not replaced:\n%s", v.Body)
+	}
+
+	// Deps can be rewired through update, with cycle refusal.
+	if _, err := run(t, dir, "update", "BUG-001", "--add-dep", "FEAT-001"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = run(t, dir, "list", "--blocked", "--json")
+	var blocked []view.Ticket
+	json.Unmarshal([]byte(out), &blocked)
+	if len(blocked) != 1 || blocked[0].ID != "BUG-001" {
+		t.Fatalf("blocked = %+v", blocked)
+	}
+	if _, err := run(t, dir, "update", "FEAT-001", "--add-dep", "BUG-001"); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("expected cycle refusal, got %v", err)
+	}
+	if _, err := run(t, dir, "update", "BUG-001", "--rm-dep", "FEAT-001"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = run(t, dir, "show", "BUG-001", "--json")
+	json.Unmarshal([]byte(out), &v)
+	if len(v.Deps) != 0 {
+		t.Fatalf("deps should be empty after --rm-dep: %v", v.Deps)
+	}
+}
+
+func TestPromptTemplateSelection(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "b")     // BUG-001
+	run(t, dir, "create", "--type", "feature", "--title", "f") // FEAT-001
+
+	out, err := run(t, dir, "prompt", "BUG-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "# Fix Request: BUG-001") {
+		t.Fatalf("bug ticket should use the fix prompt:\n%s", out)
+	}
+
+	out, err = run(t, dir, "prompt", "FEAT-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "# Implement: FEAT-001") {
+		t.Fatalf("feature ticket should use the implement prompt:\n%s", out)
+	}
+
+	// Repos initialized before implement.md existed fall back to fix.md.
+	if err := os.Remove(filepath.Join(dir, ".pine", "prompts", "implement.md")); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, dir, "prompt", "FEAT-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "# Fix Request: FEAT-001") {
+		t.Fatalf("missing implement.md should fall back to fix.md:\n%s", out)
+	}
+
+	if _, err := run(t, dir, "prompt", "FEAT-001", "--template", "nope"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected missing-template error, got %v", err)
+	}
+	custom := filepath.Join(dir, ".pine", "prompts", "custom.md")
+	if err := os.WriteFile(custom, []byte("Custom {{.ID}}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, dir, "prompt", "FEAT-001", "--template", "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Custom FEAT-001") {
+		t.Fatalf("--template should render the named file:\n%s", out)
 	}
 }
 

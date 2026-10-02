@@ -49,6 +49,112 @@ func fakeGit() gitx.Status {
 	}
 }
 
+func TestContextCompactCountsAndRelevance(t *testing.T) {
+	s := scaffold(t)
+	// One done, one doing, one ready-with-related-files, one blocked child.
+	s.Create(store.CreateReq{Type: "bug", Title: "Old bug"})
+	s.Update("BUG-001", func(u *ticket.Ticket) error { u.Status = ticket.StatusDone; return nil })
+	s.Create(store.CreateReq{Type: "feature", Title: "In flight feature"})
+	s.Update("FEAT-001", func(u *ticket.Ticket) error { u.Status = ticket.StatusDoing; return nil })
+	s.Create(store.CreateReq{Type: "bug", Title: "Touching login", Priority: "high",
+		Body: "# Description\n\nTouches the login screen.\n\n# Related Files\n- src/ — rework guards\n"})
+	s.Create(store.CreateReq{Type: "feature", Title: "Blocked child", Deps: []string{"BUG-002"}})
+
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	md := ContextCompact(s, fakeGit(), now) // git changes src/login.tsx; no commit mentions an ID
+
+	for _, want := range []string{
+		"# Project Context: my-app",
+		"compact",
+		"## Board",
+		"todo: 2 · doing: 1 · testing: 0 · done: 1 (4 tickets)",
+		"## Ready to Work (unblocked)",
+		"## Relevant to Current Changes",
+		"BUG-002 · Touching login",
+		"changed: `src/login.tsx`",
+		"## In Flight",
+		"FEAT-001 · In flight feature · doing",
+		"## Conventions",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("compact context missing %q\n---\n%s", want, md)
+		}
+	}
+	for _, banned := range []string{
+		"## Recent Commits",
+		"## Critical & High Priority (open)",
+		"## Open Tickets",
+		"## Acceptance Criteria Progress",
+		"## In Testing",
+		"## Epics",
+		"## Recently Done",
+		"## Knowledge Graph",
+		"Old bug", // done tickets appear only as counts
+	} {
+		if strings.Contains(md, banned) {
+			t.Errorf("compact context should not contain %q\n---\n%s", banned, md)
+		}
+	}
+}
+
+func TestPathMatches(t *testing.T) {
+	cases := []struct {
+		changed, related string
+		want             bool
+	}{
+		{"src/login.tsx", "src/login.tsx", true},
+		{"src/login.tsx", "src/", true},
+		{"src/login.tsx", "src", true},
+		{"src/login.tsx", "`src` (guards)", true},
+		{"src/login.tsx", "src/login.tsx — rework guards", true},
+		{"srcx/other.ts", "src", false},
+		{"src/other.ts", "internal/cli", false},
+		{"", "src/", false},
+		{"src/a.ts", "", false},
+	}
+	for _, c := range cases {
+		if got := pathMatches(c.changed, c.related); got != c.want {
+			t.Errorf("pathMatches(%q, %q) = %v, want %v", c.changed, c.related, got, c.want)
+		}
+	}
+}
+
+func TestContextCompactCommitMentionAndNoGit(t *testing.T) {
+	s := scaffold(t)
+	s.Create(store.CreateReq{Type: "bug", Title: "Named in commit",
+		Body: "# Related Files\n- src/\n- src/login.tsx — same change twice\n"})
+	git := gitx.Status{
+		IsRepo:  true,
+		Branch:  "main",
+		Changes: []gitx.Change{{Path: "src/login.tsx", Code: "M"}},
+		Commits: []gitx.Commit{{Hash: "abcdef1234567890", Subject: "work on BUG-001", Author: "t",
+			When: time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)}},
+	}
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	md := ContextCompact(s, git, now)
+	// Commit-subject mention is a relevance reason, with a shortened hash.
+	if !strings.Contains(md, "commit `abcdef12` work on BUG-001") {
+		t.Fatalf("commit mention missing from relevant section:\n%s", md)
+	}
+	// Two related-file entries matching the same change collapse to one file
+	// in the relevance reason (the Repository section lists it separately).
+	var relLine string
+	for _, ln := range strings.Split(md, "\n") {
+		if strings.HasPrefix(ln, "- BUG-001 · Named in commit") {
+			relLine = ln
+		}
+	}
+	if c := strings.Count(relLine, "`src/login.tsx`"); c != 1 {
+		t.Fatalf("changed file should be listed once in the reason, got %d (line %q):\n%s", c, relLine, md)
+	}
+
+	// No git at all still renders (repository note branch).
+	md = ContextCompact(s, gitx.Status{}, now)
+	if !strings.Contains(md, "Not a git repository.") {
+		t.Fatalf("non-repo branch missing:\n%s", md)
+	}
+}
+
 func TestContextContainsKeySections(t *testing.T) {
 	s := scaffold(t)
 	s.Create(store.CreateReq{Type: "bug", Title: "Login broken", Priority: "critical",

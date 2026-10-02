@@ -27,6 +27,22 @@ const DefaultFixTemplate = "# Fix Request: {{.ID}} — {{.Title}}\n\n" +
 	"- Summarize your changes in a `# Fix Notes` section in the ticket.\n" +
 	"- If you discovered a non-obvious project gotcha, run `pine learn \"...\"` before ending.\n"
 
+// DefaultImplementTemplate is the feature-ticket counterpart of
+// DefaultFixTemplate: acceptance criteria and the implementation plan live in
+// the ticket body (see the feature template), so this prompt keeps them up
+// front and asks for a proof command instead of bug reproduction.
+const DefaultImplementTemplate = "# Implement: {{.ID}} — {{.Title}}\n\n" +
+	"## Task\n" +
+	"Status: {{.Status}} · Priority: {{.Priority}}{{if .Labels}} · Labels: {{join .Labels \", \"}}{{end}}\n\n" +
+	"{{.Body}}\n\n" +
+	"## Related Files\n{{range .RelatedFiles}}- {{.}}\n{{else}}(none listed — list candidates under a \"# Related Files\" heading in the ticket)\n{{end}}\n" +
+	"{{if .Learnings}}## Relevant Learnings\n{{range .Learnings}}- **{{.ID}}** ({{.Scope}}{{if .Tags}}, tags: {{join .Tags \", \"}}{{end}}): {{.Body}}\n{{end}}\n{{end}}" +
+	"## When done\n" +
+	"- Record a proof command in the ticket frontmatter, e.g. `verify: grep -rn \"NewX(\" internal/ | grep -v _test.go` or a smoke command — `pine close {{.ID}} --evidence` runs it and refuses to close when it fails.\n" +
+	"- Edit `.pine/tickets/{{.ID}}.md` and set `status: testing` (then `done` once verified).\n" +
+	"- Summarize your changes in a `# Implementation Notes` section in the ticket.\n" +
+	"- If you discovered a non-obvious project gotcha, run `pine learn \"...\"` before ending.\n"
+
 // PromptData is the template context for a fix prompt.
 type PromptData struct {
 	ID           string

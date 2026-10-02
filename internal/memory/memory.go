@@ -188,10 +188,17 @@ func ReadTopic(pineDir, slug string) (Topic, error) {
 
 // AppendOpts controls an append write.
 type AppendOpts struct {
-	Text  string
-	Cites []string
-	Now   time.Time
+	Text     string
+	Cites    []string
+	Evidence string // command or citation proving the insight; recorded inline
+	Now      time.Time
 }
+
+// StaleDays is how old a dated memory bullet may get before pine flags it for
+// re-verification: doctor warns about it and pine context marks the line.
+// Memory records facts about a moving codebase; an old line is not wrong, it
+// is merely unproven.
+const StaleDays = 90
 
 // AppendMEMORY appends a dated bullet under ## Log.
 func AppendMEMORY(pineDir string, opts AppendOpts) error {
@@ -215,7 +222,7 @@ func AppendMEMORY(pineDir string, opts AppendOpts) error {
 	if !strings.Contains(content, "## Log") {
 		content = strings.TrimRight(content, "\n") + "\n\n## Log\n"
 	}
-	bullet := formatBullet(now, text, opts.Cites)
+	bullet := formatBullet(now, text, opts.Cites, opts.Evidence)
 	content = appendUnderHeading(content, "## Log", bullet)
 	return os.WriteFile(path, []byte(content), 0o644)
 }
@@ -252,7 +259,7 @@ func AppendTopic(pineDir, slug string, opts AppendOpts) error {
 		content = joinFrontmatterRaw(fm) + rest
 	}
 
-	bullet := formatBullet(now, text, opts.Cites)
+	bullet := formatBullet(now, text, opts.Cites, opts.Evidence)
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
@@ -292,12 +299,34 @@ func SetTopicLinks(pineDir, slug string, links []string) error {
 	return os.WriteFile(path, []byte(joinFrontmatterRaw(fm)+rest), 0o644)
 }
 
-func formatBullet(now time.Time, text string, cites []string) string {
+func formatBullet(now time.Time, text string, cites []string, evidence string) string {
 	line := fmt.Sprintf("- %s: %s", now.Format("2006-01-02"), text)
 	if len(cites) > 0 {
 		line += " (cites: " + strings.Join(cites, ", ") + ")"
 	}
+	if evidence = strings.TrimSpace(evidence); evidence != "" {
+		line += " (evidence: " + evidence + ")"
+	}
 	return line
+}
+
+// bulletDateRe matches the dated-bullet convention formatBullet writes:
+// "- 2026-01-02: …". Undated bullets (hand-written or from other tools) do not
+// match — ParseBulletDate reports them via ok=false so doctor can flag them.
+var bulletDateRe = regexp.MustCompile(`^\s*[-*]\s+(\d{4}-\d{2}-\d{2}):`)
+
+// ParseBulletDate extracts the leading date from a memory bullet. ok is false
+// for non-bullets and bullets without a "YYYY-MM-DD:" prefix.
+func ParseBulletDate(line string) (time.Time, bool) {
+	m := bulletDateRe.FindStringSubmatch(line)
+	if m == nil {
+		return time.Time{}, false
+	}
+	d, err := time.Parse("2006-01-02", m[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return d, true
 }
 
 func appendUnderHeading(content, heading, bullet string) string {

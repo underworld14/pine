@@ -100,6 +100,36 @@ body
 	}
 }
 
+func TestVerifyRoundTrip(t *testing.T) {
+	src := `---
+id: FEAT-011
+title: Verified work
+status: todo
+priority: medium
+verify: grep -rn "NewThing(" internal/ | grep -v _test.go
+created: 2026-07-04T00:00:00Z
+updated: 2026-07-04T00:00:00Z
+---
+body
+`
+	tk := Parse("FEAT-011", []byte(src))
+	if tk.Degraded {
+		t.Fatalf("unexpected degraded: %v", tk.Warnings)
+	}
+	if tk.Verify != `grep -rn "NewThing(" internal/ | grep -v _test.go` {
+		t.Fatalf("verify = %q", tk.Verify)
+	}
+	out := string(tk.Serialize())
+	if !strings.Contains(out, "verify: grep -rn") {
+		t.Fatalf("serialize missing verify:\n%s", out)
+	}
+	tk.Verify = ""
+	cleared := string(tk.Serialize())
+	if strings.Contains(cleared, "verify:") {
+		t.Fatalf("empty verify should be omitted:\n%s", cleared)
+	}
+}
+
 func TestRoundTripBodyByteIdentical(t *testing.T) {
 	tk := Parse("BUG-001", []byte(canonical))
 	out := tk.Serialize()

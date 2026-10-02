@@ -132,3 +132,26 @@ func TestFormatMemoryBlockDefaultLimit(t *testing.T) {
 		t.Fatalf("want 3 topics, got %d:\n%s", count, block)
 	}
 }
+
+func TestMarkStaleLines(t *testing.T) {
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	src := "# hermes\n\n" +
+		"- 2026-01-02: platform_toolsets is ignored\n" +
+		"- 2026-09-30: gateway honors platform_toolsets\n" +
+		"- undated hand-written line\n" +
+		"- 2026-01-02: trailing spaces \n"
+	got := markStaleLines(src, now)
+	if !strings.Contains(got, "- 2026-01-02: platform_toolsets is ignored ⚠ unverified since 2026-01-02") {
+		t.Fatalf("stale bullet unmarked:\n%s", got)
+	}
+	if strings.Contains(got, "2026-09-30: gateway honors platform_toolsets ⚠") {
+		t.Fatalf("fresh bullet marked stale:\n%s", got)
+	}
+	if strings.Contains(got, "undated hand-written line ⚠") {
+		t.Fatalf("undated bullet should be left alone:\n%s", got)
+	}
+	if got == markStaleLines(got, now) && strings.Count(got, "⚠") != strings.Count(src, "⚠")+2 {
+		// idempotence: re-marking must not stack markers
+		t.Fatalf("markers stack on re-run:\n%s", markStaleLines(got, now))
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/underworld14/pine/internal/memory"
 	"github.com/underworld14/pine/internal/search"
@@ -32,7 +33,7 @@ func FormatMemoryBlock(s *store.Store, cwdHints []string, ticketLabels []string,
 	mem, err := memory.ReadMEMORY(pineDir)
 	if err == nil && strings.TrimSpace(mem) != "" {
 		b.WriteString("## Project Memory\n")
-		b.WriteString(memory.TruncateForContext(strings.TrimSpace(mem), memory.ContextMEMORYCap, ".pine/"+memory.FileMEMORY))
+		b.WriteString(memory.TruncateForContext(strings.TrimSpace(markStaleLines(mem, time.Now())), memory.ContextMEMORYCap, ".pine/"+memory.FileMEMORY))
 		if !strings.HasSuffix(b.String(), "\n") {
 			b.WriteByte('\n')
 		}
@@ -53,7 +54,7 @@ func FormatMemoryBlock(s *store.Store, cwdHints []string, ticketLabels []string,
 	}
 	b.WriteString("## Memory Topics\n")
 	for _, t := range ranked {
-		excerpt := strings.TrimSpace(t.Body)
+		excerpt := strings.TrimSpace(markStaleLines(t.Body, time.Now()))
 		// Prefer last ~8 lines (newest bullets).
 		lines := strings.Split(excerpt, "\n")
 		if len(lines) > 10 {
@@ -107,6 +108,31 @@ func formatGlobalBlock() string {
 			strings.Join(names, ", "), label, memory.DirTopics)
 	}
 	return b.String()
+}
+
+// markStaleLines appends an "⚠ unverified since <date>" marker to memory bullets
+// older than memory.StaleDays, so an agent reading pine context can tell a
+// recently-proven fact from one that predates later refactors. Lines without a
+// date prefix are left alone (doctor flags those separately).
+func markStaleLines(content string, now time.Time) string {
+	lines := strings.Split(content, "\n")
+	changed := false
+	for i, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if !strings.HasPrefix(trimmed, "- ") && !strings.HasPrefix(trimmed, "* ") {
+			continue
+		}
+		d, ok := memory.ParseBulletDate(ln)
+		if !ok || now.Sub(d) <= memory.StaleDays*24*time.Hour {
+			continue
+		}
+		lines[i] = strings.TrimRight(ln, " \t\r") + " ⚠ unverified since " + d.Format("2006-01-02")
+		changed = true
+	}
+	if !changed {
+		return content
+	}
+	return strings.Join(lines, "\n")
 }
 
 func rankTopics(topics []memory.Topic, cwdHints, ticketLabels []string, limit int) []memory.Topic {

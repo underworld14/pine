@@ -23,12 +23,13 @@ const (
 	tmplFeature = "# Description\n\n# Acceptance Criteria\n- [ ] Define acceptance criteria\n\n# Implementation Plan\n\n# Notes\n\n# Related Files\n\n# Attachments\n"
 	tmplEpic    = "# Description\n\n# Goals\n"
 
-	promptFix = contextgen.DefaultFixTemplate
+	promptFix       = contextgen.DefaultFixTemplate
+	promptImplement = contextgen.DefaultImplementTemplate
 )
 
 func newInitCmd() *cobra.Command {
 	var (
-		alias            string
+		alias             string
 		skipAgents        bool
 		syncTickets       = true
 		syncAttachments   = false
@@ -88,6 +89,7 @@ func runInit(cmd *cobra.Command, skipAgents bool, syncSeed syncignore.Prefs, ali
 		{filepath.Join(pineDir, "templates", "feature.md"), []byte(tmplFeature)},
 		{filepath.Join(pineDir, "templates", "epic.md"), []byte(tmplEpic)},
 		{filepath.Join(pineDir, "prompts", "fix.md"), []byte(promptFix)},
+		{filepath.Join(pineDir, "prompts", "implement.md"), []byte(promptImplement)},
 		{filepath.Join(pineDir, "MEMORY.md"), []byte(memory.DefaultMEMORY)},
 	}
 	createdAny := false

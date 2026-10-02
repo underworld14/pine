@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/learning"
@@ -188,11 +189,64 @@ func Run(s *store.Store) *Report {
 	checkGitignore(r, root)
 	checkMergeDriver(r, root)
 	checkGlobalMemory(r, cfg)
+	checkMemoryAge(r, root, time.Now())
 
 	if !r.HasErrors() {
 		r.ok("no problems found")
 	}
 	return r
+}
+
+// memoryStaleDays mirrors memory.StaleDays for the messages below.
+const memoryStaleDays = memory.StaleDays
+
+// checkMemoryAge flags memory bullets too old to trust without re-verification
+// (or carrying no date at all) in MEMORY.md and .pine/memory/<topic>.md. These
+// files are plain markdown injected into pine context, so this is a read-only
+// nudge: re-verify the claim and append a fresh dated bullet, or delete the
+// refuted line.
+func checkMemoryAge(r *Report, root string, now time.Time) {
+	checkOne := func(label, content string) {
+		var stale, undated, total int
+		oldest := ""
+		for _, ln := range strings.Split(content, "\n") {
+			trimmed := strings.TrimSpace(ln)
+			if !strings.HasPrefix(trimmed, "- ") && !strings.HasPrefix(trimmed, "* ") {
+				continue
+			}
+			total++
+			d, ok := memory.ParseBulletDate(ln)
+			if !ok {
+				undated++
+				continue
+			}
+			if now.Sub(d) > memoryStaleDays*24*time.Hour {
+				stale++
+				if ds := d.Format("2006-01-02"); oldest == "" || ds < oldest {
+					oldest = ds
+				}
+			}
+		}
+		if total == 0 {
+			return
+		}
+		if undated > 0 {
+			r.warn(fmt.Sprintf("%s: %d/%d bullets have no \"YYYY-MM-DD:\" date prefix — add one so staleness is trackable", label, undated, total))
+		}
+		if stale > 0 {
+			r.warn(fmt.Sprintf("%s: %d/%d bullets older than %d days (oldest %s) — re-verify and append a fresh dated bullet, or delete the refuted line", label, stale, total, memoryStaleDays, oldest))
+		}
+	}
+	if body, err := memory.ReadMEMORY(root); err == nil && strings.TrimSpace(body) != "" {
+		checkOne(memory.FileMEMORY, body)
+	}
+	topics, err := memory.ListTopics(root)
+	if err != nil {
+		return
+	}
+	for _, t := range topics {
+		checkOne(t.RelPath, t.Body)
+	}
 }
 
 // checkGlobalMemory reports on the machine-wide memory store that pine context

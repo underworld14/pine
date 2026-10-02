@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +131,103 @@ func TestCloseEvidenceReRunReplacesSection(t *testing.T) {
 	after, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "FEAT-001.md"))
 	if c := strings.Count(string(after), "## Work Evidence"); c != 1 {
 		t.Fatalf("expected 1 evidence section after re-run, got %d", c)
+	}
+}
+
+// TestCloseEvidenceVerify covers the `verify:` frontmatter command: a passing
+// command closes the ticket with a Verification section, a failing one refuses
+// the close (ticket stays open) unless --force is passed.
+func TestCloseEvidenceVerify(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	run(t, dir, "create", "--type", "feature", "--title", "verified", "--verify", "grep -q feature .pine/tickets/FEAT-001.md")
+
+	// Passing command: close succeeds and records the section.
+	if _, err := run(t, dir, "close", "--evidence", "FEAT-001"); err != nil {
+		t.Fatalf("close --evidence with passing verify: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "FEAT-001.md"))
+	got := string(body)
+	if !strings.Contains(got, "status: done") || !strings.Contains(got, "## Verification") || !strings.Contains(got, "**passed**") {
+		t.Fatalf("expected done ticket with passing Verification section:\n%s", got)
+	}
+	if !strings.Contains(got, "## Work Evidence") {
+		t.Fatalf("work evidence should still be attached:\n%s", got)
+	}
+
+	// Failing command: close refused, ticket stays open.
+	run(t, dir, "create", "--type", "bug", "--title", "failing verify", "--verify", "exit 3")
+	_, err := run(t, dir, "close", "--evidence", "BUG-001")
+	if err == nil || !strings.Contains(err.Error(), "verification FAILED (exit 3)") {
+		t.Fatalf("expected verification refusal, got %v", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	if strings.Contains(string(raw), "status: done") {
+		t.Fatalf("ticket must stay open after failed verification:\n%s", raw)
+	}
+
+	// --force closes anyway and records the failure.
+	if _, err := run(t, dir, "close", "--evidence", "--force", "BUG-001"); err != nil {
+		t.Fatalf("close --force: %v", err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, ".pine", "tickets", "BUG-001.md"))
+	if !strings.Contains(string(raw), "status: done") || !strings.Contains(string(raw), "**FAILED**") {
+		t.Fatalf("expected done ticket with recorded failure:\n%s", raw)
+	}
+}
+
+// TestAppendSectionPreservesSiblingSections checks that replacing Work
+// Evidence keeps a trailing Verification section (stable section order on
+// re-closing a --force ticket).
+func TestAppendSectionPreservesSiblingSections(t *testing.T) {
+	body := "## Description\n\nnotes\n\n## Work Evidence\n\nold\n\n## Verification\n\nold-ver\n"
+	got := appendSection(body, "Work Evidence", "## Work Evidence\n\nnew\n")
+	want := "## Description\n\nnotes\n\n## Work Evidence\n\nnew\n\n## Verification\n\nold-ver\n"
+	if got != want {
+		t.Fatalf("appendSection = %q, want %q", got, want)
+	}
+	got = appendSection(got, "Verification", "## Verification\n\nnew-ver\n")
+	want = "## Description\n\nnotes\n\n## Work Evidence\n\nnew\n\n## Verification\n\nnew-ver\n"
+	if got != want {
+		t.Fatalf("appendSection = %q, want %q", got, want)
+	}
+}
+
+// TestTailLinesTrims covers the trim path (output longer than the cap) and the
+// short-circuit (output within the cap).
+func TestTailLinesTrims(t *testing.T) {
+	var sb strings.Builder
+	for i := 1; i <= 50; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	got := tailLines(sb.String(), 40)
+	if !strings.Contains(got, "… (10 earlier lines trimmed)") || !strings.Contains(got, "line 50") || strings.Contains(got, "line 9\n") {
+		t.Fatalf("tailLines(50, 40) = %q", got)
+	}
+	if got := tailLines("short\n", 40); got != "short\n" {
+		t.Fatalf("tailLines short-circuit = %q", got)
+	}
+}
+
+// TestVerifySectionNoteOnNonExitError covers the section() branch where the
+// command failed without an exit code (lookup error, signal, timeout): the
+// error is rendered as a parenthetical note instead of being swallowed.
+func TestVerifySectionNoteOnNonExitError(t *testing.T) {
+	r := verifyResult{
+		ran:      true,
+		err:      &exec.Error{Name: "sh", Err: errors.New("not found")},
+		exitCode: -1,
+		duration: time.Millisecond,
+		output:   "partial output",
+	}
+	s := r.section()
+	if !strings.Contains(s, "**FAILED**") {
+		t.Fatalf("expected FAILED status:\n%s", s)
+	}
+	if !strings.Contains(s, `(exec: "sh": not found)`) {
+		t.Fatalf("expected error note:\n%s", s)
+	}
+	if !strings.Contains(s, "partial output") {
+		t.Fatalf("expected output kept:\n%s", s)
 	}
 }
 

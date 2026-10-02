@@ -50,7 +50,7 @@ func globalConflict(scopeNorm, ticketID, sup, component string, legacyLRN bool) 
 func newLearnCmd() *cobra.Command {
 	var (
 		scope, ticket, component, source, tagsCSV, supersedes, citesCSV, textFlag string
-		toPath, newTopic                                                          string
+		toPath, newTopic, evidence                                                string
 		asJSON, legacyLRN, global                                                 bool
 	)
 	cmd := &cobra.Command{
@@ -113,7 +113,7 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 				if err != nil {
 					return err
 				}
-				return captureMemoryInsight(cmd, ms, text, cites, "", toPath, newTopic, asJSON)
+				return captureMemoryInsight(cmd, ms, text, cites, "", toPath, newTopic, evidence, asJSON)
 			}
 
 			s, err := openStore()
@@ -155,7 +155,7 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 			}
 
 			// Default / component → MEMORY.md or memory/<topic>.md
-			return captureMemoryInsight(cmd, projectStore(s), text, cites, component, toPath, newTopic, asJSON)
+			return captureMemoryInsight(cmd, projectStore(s), text, cites, component, toPath, newTopic, evidence, asJSON)
 		},
 	}
 	f := cmd.Flags()
@@ -169,6 +169,7 @@ Subcommands: list, search, show, suggest, supersede, rm.`,
 	f.StringVar(&source, "source", learning.SourceManual, "source agent: claude-code|codex|cursor|gemini|manual")
 	f.StringVar(&supersedes, "supersedes", "", "learning ID this insight replaces (creates LRN)")
 	f.StringVar(&citesCSV, "cites", "", "comma-separated repo-relative file paths this insight depends on")
+	f.StringVar(&evidence, "evidence", "", "proof command or citation recorded inline with the bullet (memory destinations only)")
 	f.StringVar(&textFlag, "text", "", `insight text, as an alternative to the positional argument (required if the insight is exactly "list", "search", "show", or "suggest")`)
 	f.StringVar(&toPath, "to", "", "force destination: MEMORY.md or memory/<topic>.md")
 	f.StringVar(&newTopic, "new-topic", "", "create/append memory/<slug>.md")
@@ -468,9 +469,9 @@ first with --scope, --tags (AND), and --ticket.`,
 						dto.Stale = stale[l.ID]
 						dto.SupersededBy = learning.SupersededBy(rev, created, l.ID)
 						out = append(out, hitOut{
-							Kind:         "learning",
-							Score:        h.Score,
-							LearningHit:  view.LearningHit{Learning: dto, Score: h.Score},
+							Kind:        "learning",
+							Score:       h.Score,
+							LearningHit: view.LearningHit{Learning: dto, Score: h.Score},
 						})
 						continue
 					}

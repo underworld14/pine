@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/underworld14/pine/internal/config"
 	"github.com/underworld14/pine/internal/memory"
@@ -47,6 +48,42 @@ func msgs(r *Report) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func TestCheckMemoryAge(t *testing.T) {
+	_, pine := scaffold(t)
+	os.MkdirAll(filepath.Join(pine, "memory"), 0o755)
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	os.WriteFile(filepath.Join(pine, "memory", "hermes.md"), []byte(
+		"---\ntopic: hermes\nupdated: 2026-10-02T00:00:00Z\n---\n\n# hermes\n\n"+
+			"- 2026-01-02: platform_toolsets is ignored (refuted by a later probe)\n"+
+			"- 2026-09-30: gateway honors platform_toolsets (evidence: probe 2026-09-30)\n"+
+			"- hand-written line with no date\n"), 0o644)
+
+	r := &Report{}
+	checkMemoryAge(r, pine, now)
+	got := msgs(r)
+	// Only the 2026-01-02 bullet is stale; the 2026-09-30 one is fresh and the
+	// undated line is counted in the total but flagged separately.
+	if !strings.Contains(got, "1/3 bullets older than 90 days (oldest 2026-01-02)") {
+		t.Fatalf("stale summary missing:\n%s", got)
+	}
+	if !strings.Contains(got, "1/3 bullets have no") {
+		t.Fatalf("undated warning missing:\n%s", got)
+	}
+	if !strings.Contains(got, "memory/hermes.md") {
+		t.Fatalf("warning should name the topic file:\n%s", got)
+	}
+
+	// Fresh, dated bullets produce no findings.
+	os.WriteFile(filepath.Join(pine, "memory", "hermes.md"), []byte(
+		"---\ntopic: hermes\nupdated: 2026-10-02T00:00:00Z\n---\n\n# hermes\n\n"+
+			"- 2026-09-30: fresh fact (evidence: probe)\n"), 0o644)
+	r2 := &Report{}
+	checkMemoryAge(r2, pine, now)
+	if m := msgs(r2); strings.Contains(m, "hermes") {
+		t.Fatalf("fresh bullet should not warn:\n%s", m)
+	}
 }
 
 func TestCleanWorkspacePasses(t *testing.T) {

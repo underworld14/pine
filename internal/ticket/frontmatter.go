@@ -14,8 +14,8 @@ import (
 // else is preserved verbatim in Ticket.Extra.
 var knownKeys = map[string]bool{
 	"id": true, "title": true, "status": true, "priority": true, "order": true,
-	"labels": true, "deps": true, "parent": true, "phase": true, "links": true,
-	"created": true, "updated": true,
+	"labels": true, "deps": true, "parent": true, "phase": true, "verify": true,
+	"links": true, "created": true, "updated": true,
 }
 
 // Parse reads a ticket file. id is the canonical identifier taken from the
@@ -84,6 +84,8 @@ func Parse(id string, raw []byte) *Ticket {
 			t.Parent = strings.TrimSpace(val.Value)
 		case "phase":
 			t.Phase = strings.TrimSpace(val.Value)
+		case "verify":
+			t.Verify = strings.TrimSpace(val.Value)
 		case "links":
 			t.Links = frontmatter.DecodeStringList(val, func(msg string) {
 				t.Warnings = append(t.Warnings, "links "+msg)
@@ -133,6 +135,9 @@ func (t *Ticket) Serialize() []byte {
 	}
 	if t.Phase != "" {
 		add("phase", frontmatter.Scalar(t.Phase))
+	}
+	if t.Verify != "" {
+		add("verify", frontmatter.Scalar(t.Verify))
 	}
 	if len(t.Links) > 0 {
 		add("links", frontmatter.Seq(t.Links))

@@ -135,15 +135,37 @@ func newShowCmd() *cobra.Command {
 
 func newCreateCmd() *cobra.Command {
 	var (
-		typ, title, priority, parent, phase, status, bodyFile string
-		labels, deps                                          []string
-		asJSON                                                bool
+		typ, title, priority, parent, phase, verify, status, bodyFile string
+		labels, deps                                                  []string
+		asJSON                                                        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a ticket (bug, feature, or epic)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Long: `Create a ticket (bug, feature, or epic).
+
+The body (from --body-file or the type template) uses "#"-level sections.
+Pine reads two of them:
+
+  # Acceptance Criteria     checkboxes here drive progress counters
+  # Related Files           one bullet per repo-relative path, e.g.
+
+    # Related Files
+    - internal/cli/tickets.go — add the flag
+    - internal/contextgen/    — whole folder
+
+  The path is the bullet's first token (directories, backticks, and a leading
+  @ all work); text after it is a free-form annotation. pine context uses
+  these paths to pick the tickets relevant to your current changes.
+
+--json prints the created ticket as the same DTO pine show --json uses
+(id, type, title, status, priority, labels, deps, parent, phase, verify,
+links, created, updated, blocked/unmet/dangling, hash, body).
+
+Dependencies set at creation can be rewired later with pine dep add/rm or
+pine update --add-dep/--rm-dep.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -160,6 +182,7 @@ func newCreateCmd() *cobra.Command {
 				Deps:     normalizeIDs(deps),
 				Parent:   normalizeID(parent),
 				Phase:    phase,
+				Verify:   verify,
 				Status:   status,
 				Body:     body,
 			})
@@ -181,6 +204,7 @@ func newCreateCmd() *cobra.Command {
 	f.StringSliceVar(&deps, "deps", nil, "dependency ticket ids (blocked until they are done)")
 	f.StringVar(&parent, "parent", "", "epic ticket id this belongs to")
 	f.StringVar(&phase, "phase", "", "optional phase (e.g. p0, p1, p2)")
+	f.StringVar(&verify, "verify", "", "proof command run by pine close --evidence (e.g. a grep for callers or a smoke test)")
 	f.StringVar(&status, "status", "", "initial status (defaults to first board column)")
 	f.StringVar(&bodyFile, "body-file", "", "read the body from a file, or '-' for stdin")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
@@ -193,13 +217,18 @@ func newCreateCmd() *cobra.Command {
 
 func newUpdateCmd() *cobra.Command {
 	var (
-		status, title, priority, parent, phase string
-		addLabels, rmLabels                    []string
+		status, title, priority, parent, phase, verify, bodyFile string
+		addLabels, rmLabels, addDeps, rmDeps                     []string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <ID>",
-		Short: "Update a ticket's fields (body is left untouched)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Update a ticket's fields (body via --body-file, deps via --add-dep/--rm-dep)",
+		Long: `Update a ticket's fields.
+
+Use --body-file <path|-> to replace the markdown body (everything after the
+frontmatter). Dependencies can be rewired with --add-dep/--rm-dep here, or via
+pine dep add/rm (both refuse cycles).`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
@@ -207,6 +236,26 @@ func newUpdateCmd() *cobra.Command {
 			}
 			id := normalizeID(args[0])
 			flags := cmd.Flags()
+			var body string
+			if flags.Changed("body-file") {
+				if body, err = readBody(bodyFile, cmd.InOrStdin()); err != nil {
+					return err
+				}
+			}
+			// Resolve the final dep set (and refuse cycles) before the locked
+			// update, mirroring pine dep add/rm.
+			depsChanged := len(addDeps) > 0 || len(rmDeps) > 0
+			var mergedDeps []string
+			if depsChanged {
+				cur, err := s.Get(id)
+				if err != nil {
+					return err
+				}
+				mergedDeps = removeDeps(mergeDeps(cur.Deps, normalizeIDs(addDeps)), normalizeIDs(rmDeps))
+				if cyc := wouldCycle(s, id, mergedDeps); cyc != nil {
+					return fmt.Errorf("that dependency would create a cycle among: %s", strings.Join(cyc, ", "))
+				}
+			}
 			t, err := s.Update(id, func(u *ticket.Ticket) error {
 				if flags.Changed("status") {
 					u.Status = status
@@ -231,6 +280,24 @@ func newUpdateCmd() *cobra.Command {
 						u.Phase = phase
 					}
 				}
+				if flags.Changed("verify") {
+					if strings.EqualFold(verify, "none") {
+						u.Verify = ""
+					} else {
+						u.Verify = verify
+					}
+				}
+				if depsChanged {
+					u.Deps = mergedDeps
+				}
+				if flags.Changed("body-file") {
+					// Match create: the body starts on its own line after the
+					// closing frontmatter delimiter.
+					if body != "" && !strings.HasPrefix(body, "\n") {
+						body = "\n" + body
+					}
+					u.Body = body
+				}
 				u.Labels = applyLabelEdits(u.Labels, addLabels, rmLabels)
 				return nil
 			})
@@ -247,6 +314,10 @@ func newUpdateCmd() *cobra.Command {
 	f.StringVarP(&priority, "priority", "p", "", "new priority")
 	f.StringVar(&parent, "parent", "", "new epic parent id, or 'none' to clear")
 	f.StringVar(&phase, "phase", "", "new phase (e.g. p0, p1), or 'none' to clear")
+	f.StringVar(&verify, "verify", "", "proof command run by pine close --evidence, or 'none' to clear")
+	f.StringVar(&bodyFile, "body-file", "", "replace the markdown body from a file, or '-' for stdin")
+	f.StringSliceVar(&addDeps, "add-dep", nil, "dependency ticket ids to add (see also pine dep add)")
+	f.StringSliceVar(&rmDeps, "rm-dep", nil, "dependency ticket ids to remove (see also pine dep rm)")
 	f.StringSliceVar(&addLabels, "add-label", nil, "labels to add")
 	f.StringSliceVar(&rmLabels, "rm-label", nil, "labels to remove")
 	return cmd
@@ -255,7 +326,7 @@ func newUpdateCmd() *cobra.Command {
 // --- close ---
 
 func newCloseCmd() *cobra.Command {
-	var evidence bool
+	var evidence, force bool
 	cmd := &cobra.Command{
 		Use:   "close <ID>...",
 		Short: "Mark one or more tickets done",
@@ -264,7 +335,12 @@ func newCloseCmd() *cobra.Command {
 With --evidence, append a "## Work Evidence" section to each ticket's body
 (commits that reference/touch it + a diffstat from the commit at its creation
 time to the working tree) before marking it done — a durable record of what
-changed, suitable for review and audits.`,
+changed, suitable for review and audits.
+
+When a ticket defines a ` + "`verify:`" + ` frontmatter command, --evidence also runs it
+in the repo root and appends a "## Verification" section with the exit status
+and output. A failing verify command refuses the close (the ticket stays open);
+pass --force to close anyway and record the failure.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -273,31 +349,51 @@ changed, suitable for review and audits.`,
 			}
 			for _, arg := range args {
 				id := normalizeID(arg)
-				// Compute evidence BEFORE the locked update so git never runs
-				// under the store write lock.
+				// Run verification and compute evidence BEFORE the locked update
+				// so neither the verify command nor git runs under the store
+				// write lock.
 				ev := ""
+				ver := verifyResult{}
 				if evidence {
+					ver = verifyEvidence(s, id)
+					if ver.failed() && !force {
+						tail := strings.TrimSpace(ver.output)
+						if len(tail) > 600 {
+							tail = "…" + tail[len(tail)-600:]
+						}
+						return fmt.Errorf("%s: verification FAILED (exit %d) — ticket left open; fix it or pass --force\n%s",
+							id, ver.exitCode, tail)
+					}
 					ev = workEvidence(s, id)
 				}
+				verSection := ver.section()
 				if _, err := s.Update(id, func(u *ticket.Ticket) error {
 					u.Status = ticket.StatusDone
 					if evidence {
 						u.Body = appendEvidence(u.Body, ev)
+						if verSection != "" {
+							u.Body = appendSection(u.Body, "Verification", verSection)
+						}
 					}
 					return nil
 				}); err != nil {
 					return fmt.Errorf("%s: %w", id, err)
 				}
-				if evidence {
+				switch {
+				case evidence && ver.failed():
+					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (verification FAILED, recorded — --force was passed)\n", id)
+				case evidence:
 					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (with work evidence)\n", id)
-				} else {
+				default:
 					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s\n", id)
 				}
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&evidence, "evidence", false, "attach a Work Evidence section (commits + file changes) to each ticket before marking it done")
+	f := cmd.Flags()
+	f.BoolVar(&evidence, "evidence", false, "attach a Work Evidence section (commits + file changes) and run the ticket's verify: command before marking it done")
+	f.BoolVar(&force, "force", false, "close even when the verify: command fails (the failure is recorded)")
 	return cmd
 }
 

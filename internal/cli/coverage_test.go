@@ -178,8 +178,8 @@ func TestListShowReadyTextOutput(t *testing.T) {
 func TestReadyTreeInjectsBlockedEpicParent(t *testing.T) {
 	dir := initRepo(t)
 
-	run(t, dir, "create", "--type", "feature", "--title", "blocker") // FEAT-001
-	run(t, dir, "create", "--type", "epic", "--title", "Blocked epic", "--deps", "FEAT-001") // EPIC-001
+	run(t, dir, "create", "--type", "feature", "--title", "blocker")                                           // FEAT-001
+	run(t, dir, "create", "--type", "epic", "--title", "Blocked epic", "--deps", "FEAT-001")                   // EPIC-001
 	run(t, dir, "create", "--type", "feature", "--title", "Ready child", "--parent", "EPIC-001", "-p", "high") // FEAT-002
 
 	readyOut, err := run(t, dir, "ready")
@@ -411,6 +411,40 @@ func TestContextAndPromptTextOutput(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "BUG-001") {
 		t.Fatalf("prompt missing ticket id:\n%s", prompt)
+	}
+}
+
+// TestContextCompactDefaultFullOptOut checks the default context is the compact
+// briefing (board counts, no full ticket tables) and --full restores the
+// exhaustive layout.
+func TestContextCompactDefaultFullOptOut(t *testing.T) {
+	dir := initRepo(t)
+	run(t, dir, "create", "--type", "bug", "--title", "closed bug")
+	run(t, dir, "close", "BUG-001")
+	run(t, dir, "create", "--type", "bug", "--title", "open bug") // BUG-002
+
+	compact, err := run(t, dir, "context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compact, "## Board") || !strings.Contains(compact, "done: 1") {
+		t.Fatalf("compact context missing board counts:\n%s", compact)
+	}
+	if !strings.Contains(compact, "open bug") {
+		t.Fatalf("compact context missing the ready ticket:\n%s", compact)
+	}
+	for _, banned := range []string{"## Open Tickets", "Recently Done", "closed bug"} {
+		if strings.Contains(compact, banned) {
+			t.Fatalf("compact context should not contain %q:\n%s", banned, compact)
+		}
+	}
+
+	full, err := run(t, dir, "context", "--full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(full, "## Open Tickets") || !strings.Contains(full, "open bug") {
+		t.Fatalf("--full context missing the open tickets table:\n%s", full)
 	}
 }
 

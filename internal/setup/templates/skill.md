@@ -34,27 +34,39 @@ auditable:
    every edit.)
 2. **While working** — keep notes/decisions in `.pine/tickets/<ID>.md`. If you
    discover a durable insight, `pine learn "…"`.
-3. **When the work is done** — close the ticket AND attach the file-change
+3. **Before closing** — if the ticket touches production code, record a proof
+   command in its frontmatter so "done" means "proven live":
+   ```text
+   pine update <ID> --verify 'grep -rn "NewFunc(" internal/ | grep -v _test.go'
+   ```
+   A grep for real callers or a smoke command both work.
+4. **When the work is done** — close the ticket AND attach the file-change
    evidence in one step:
    ```text
    pine close <ID> --evidence
    ```
-   This marks the ticket `done` and appends a `## Work Evidence` section
+   This runs the ticket's `verify:` command in the repo root (a failure
+   refuses the close — fix it or pass `--force` to close with the failure
+   recorded), then marks the ticket `done` and appends a `## Verification`
+   section (command, exit status, output) plus a `## Work Evidence` section
    (commits that reference/touch the ticket + a `git diff --stat` from the
-   commit at its creation time to the working tree) to the ticket body — a
-   durable record of what changed and why.
+   commit at its creation time to the working tree) — a durable record of what
+   changed and why, and proof it is actually wired in.
 
 ## Essential commands
 
 ```text
 pine ready [--json]              # actionable unblocked tickets
 pine show <ID> [--json]          # full ticket with deps and children
-pine prompt <ID>                 # paste-ready fix brief for one ticket
-pine context                     # full project briefing (run at session start)
+pine prompt <ID>                 # fix brief for bugs, implement brief for features
+pine prompt <ID> --template name # render .pine/prompts/<name>.md instead
+pine context [--full]            # compact briefing by default; --full = exhaustive
 pine list [--all] [--json]       # open tickets by default; --all includes done
 pine log <ID> [--json]           # commits that reference or touch this ticket
 pine create / update / close     # CLI mutations
-pine close <ID> --evidence       # mark done + attach file-change evidence
+pine update <ID> --body-file f   # replace the markdown body (or '-' for stdin)
+pine dep add <ID> <DEP>… / rm    # rewire dependencies after creation (refuses cycles)
+pine close <ID> --evidence       # run verify:, attach evidence, mark done
 pine learn "<insight>"           # capture a durable cross-agent learning
 pine learn list / search / show  # inspect learnings
 pine learn supersede / rm        # replace or delete a learning
@@ -63,17 +75,25 @@ pine doctor [--fix]              # health check; --fix repairs mechanical issues
 
 ## Write-back rules
 
-- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: `id`, `title`, `status`, `priority`, `labels`, `deps`, `parent`.
+- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: `id`, `title`, `status`, `priority`, `labels`, `deps`, `parent`, `phase`, `verify`, `links`.
 - Move a ticket on the board by editing its `status`{{BOARD_COLUMNS_LINE}}
-- `deps` lists ticket IDs that block this one; a ticket is **ready** when every dep is `done`.
+- `deps` lists ticket IDs that block this one; a ticket is **ready** when every dep is `done`. Rewire them with `pine dep add/rm` or `pine update --add-dep/--rm-dep` — no need to create tickets in dependency order.
 - `parent` points at an EPIC ticket for grouping.
+- `verify:` is a shell command proving the work is live (grep for callers, smoke test); `pine close --evidence` runs it and refuses to close on failure.
+- The body uses `#`-level sections. Pine reads `# Acceptance Criteria` (checkboxes drive progress) and `# Related Files` — one bullet per repo-relative path, annotation after the path is fine:
+  ```markdown
+  # Related Files
+  - internal/cli/tickets.go — add the flag
+  - internal/contextgen/    — whole folder
+  ```
+  `pine context` uses these paths to pick tickets relevant to your current changes.
 - Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.
 - **Do not** use markdown TODO lists for issue tracking — use Pine tickets.
 - Prefer editing ticket files over ad-hoc notes or separate task files.
 
 ## Live context
 
-Run `pine context` at the start of a session for current tickets, git state, ready work, and relevant learnings.
+Run `pine context` at the start of a session. It is compact by default — board counts, ready work, tickets relevant to your uncommitted changes and recent commits, memory, conventions — so done work does not flood your context window. Pass `--full` when you need every open ticket table, acceptance criteria, epics, and recent commits.
 
 ## Persistent learnings
 
@@ -85,6 +105,7 @@ pine learn "<insight>" [--cites path]           # auto-append when confident; el
 pine learn "<insight>" --to MEMORY.md           # project prefs / general rules
 pine learn "<insight>" --to memory/analytics.md # domain topic (append)
 pine learn "<insight>" --new-topic analytics    # create topic + first bullet
+pine learn "<insight>" --evidence "<cmd|citation>"  # record the proof inline with the bullet
 pine learn "<insight>" --scope ticket --ticket ID   # rare ticket-scoped LRN-*
 pine learn list / search / show MEMORY.md
 pine learn -g "<insight>"                       # personal: applies in every repo (~/.pine)
@@ -128,7 +149,13 @@ memory). Update the existing line instead of appending a near-duplicate; delete 
 turned out wrong.
 
 **One fact per bullet** — concrete and self-contained; readable a month later with no session
-context. No ticket IDs, no dates.
+context. No ticket IDs, no dates (pine prefixes the write date itself).
+
+**Stale memory** — every bullet carries the date it was written; bullets older than
+90 days are marked `⚠ unverified since <date>` in `pine context` and flagged by
+`pine doctor`. When a probe or code review refutes an old line, delete it or
+append a fresh dated bullet with `--evidence "<probe>"` stating the newer
+finding — do not leave contradicted lines sitting next to true ones.
 
 **Where it goes**
 

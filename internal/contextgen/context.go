@@ -189,9 +189,19 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 	}
 
 	// Conventions — the part that teaches agents to write back.
+	writeConventions(&b, s, memBlock)
+
+	return b.String()
+}
+
+// writeConventions emits the write-back rules every pine context ends with.
+// memBlock is the already-rendered memory block, used to point at the global
+// preferences section only when it actually rendered.
+func writeConventions(b *strings.Builder, s *store.Store, memBlock string) {
+	cfg := s.Config()
 	b.WriteString("## Conventions\n")
 	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, phase, links.\n")
-	fmt.Fprintf(&b, "- Move a ticket by editing its `status` (board columns: %s).\n", strings.Join(s.Board().Statuses(), ", "))
+	fmt.Fprintf(b, "- Move a ticket by editing its `status` (board columns: %s).\n", strings.Join(s.Board().Statuses(), ", "))
 	b.WriteString("- `deps` lists ticket IDs that block this one; a ticket is ready when every dep is `done`.\n")
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
 	b.WriteString("- `links` lists typed graph refs (ticket IDs, `LRN-*`, `memory/<topic>`, `MEMORY`); backlinks are computed.\n")
@@ -209,8 +219,6 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 			b.WriteString("- Preferences that hold in every repo go in your global store: `pine learn -g \"...\"` (nothing there yet).\n")
 		}
 	}
-
-	return b.String()
 }
 
 func writeTable(b *strings.Builder, ts []*ticket.Ticket) {
