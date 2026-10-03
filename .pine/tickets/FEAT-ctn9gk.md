@@ -1,6 +1,6 @@
 ---
 id: FEAT-ctn9gk
-title: 'Phase 4: parallel scheduler with dependency waves'
+title: 'Phase 6: parallel scheduler with dependency waves'
 status: todo
 priority: high
 labels:
@@ -8,9 +8,9 @@ labels:
 deps:
     - FEAT-kg580g
 parent: EPIC-23747d
-phase: p4
+phase: p6
 created: "2026-08-08T18:23:56Z"
-updated: "2026-08-08T18:23:56Z"
+updated: "2026-10-02T08:59:19Z"
 ---
 
 # Description

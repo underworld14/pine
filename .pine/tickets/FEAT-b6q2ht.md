@@ -1,6 +1,6 @@
 ---
 id: FEAT-b6q2ht
-title: 'Phase 7: web UI for agents, runs, and board dispatch'
+title: 'Phase 9: web UI for agents, runs, and board dispatch'
 status: todo
 priority: high
 labels:
@@ -9,9 +9,9 @@ deps:
     - FEAT-ctn9gk
     - FEAT-ndg5rr
 parent: EPIC-23747d
-phase: p7
+phase: p9
 created: "2026-08-08T18:23:56Z"
-updated: "2026-08-08T18:23:56Z"
+updated: "2026-10-02T08:59:19Z"
 ---
 
 # Description

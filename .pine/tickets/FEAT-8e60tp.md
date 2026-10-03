@@ -1,6 +1,6 @@
 ---
 id: FEAT-8e60tp
-title: 'Phase 5: epic queue with inherited assignment'
+title: 'Phase 7: epic queue with inherited assignment'
 status: todo
 priority: medium
 labels:
@@ -8,9 +8,9 @@ labels:
 deps:
     - FEAT-ctn9gk
 parent: EPIC-23747d
-phase: p5
+phase: p7
 created: "2026-08-08T18:23:56Z"
-updated: "2026-08-08T18:23:56Z"
+updated: "2026-10-02T08:59:19Z"
 ---
 
 # Description

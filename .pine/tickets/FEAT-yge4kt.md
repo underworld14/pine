@@ -1,16 +1,16 @@
 ---
 id: FEAT-yge4kt
-title: 'Phase 8: orchestrator review of diff versus acceptance criteria'
+title: 'Phase 4: orchestrator review of diff versus acceptance criteria'
 status: todo
-priority: low
+priority: high
 labels:
     - agents
 deps:
     - FEAT-kg580g
 parent: EPIC-23747d
-phase: p8
+phase: p4
 created: "2026-08-08T18:23:56Z"
-updated: "2026-08-08T18:23:56Z"
+updated: "2026-10-02T08:59:19Z"
 ---
 
 # Description
@@ -29,6 +29,10 @@ Spec: `docs/superpowers/specs/2026-08-09-agent-assignment-babysitter-design.md` 
 # Implementation Plan
 
 # Notes
+
+Promoted from phase 8 to phase 4 (2026-10-02): closes the largest hole in
+the state-only contract and needs nothing beyond phase 3; the remaining
+phases renumbered accordingly.
 
 # Related Files
 

@@ -1,6 +1,6 @@
 ---
 id: FEAT-ndg5rr
-title: 'Phase 6: ACL-lite agent messages and inbox'
+title: 'Phase 8: ACL-lite agent messages and inbox'
 status: todo
 priority: medium
 labels:
@@ -8,9 +8,9 @@ labels:
 deps:
     - FEAT-kg580g
 parent: EPIC-23747d
-phase: p6
+phase: p8
 created: "2026-08-08T18:23:56Z"
-updated: "2026-08-08T18:23:56Z"
+updated: "2026-10-02T08:59:19Z"
 ---
 
 # Description

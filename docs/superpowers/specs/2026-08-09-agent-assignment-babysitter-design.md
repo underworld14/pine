@@ -205,6 +205,11 @@ protocol: it is ordinary ticket state, visible on the board and in git.
 The two failure paths are deliberately distinct: `blocked` means *stop and
 ask*, `parked` means *tried N times and could not finish*.
 
+**Relation to existing evidence.** `pine close --evidence` already attaches
+file-change evidence when a human closes a ticket. The contract stays
+state-only on purpose: evidence remains a close-time artifact attached by a
+person, while delegated diff review (phase 4) is the machine-side check.
+
 ### The babysit loop
 
 ```
@@ -310,7 +315,7 @@ relationship renders in `TicketRelations` and the graph view with no new UI.
 **Not auto-assigned.** Discovered tickets are created without an `assignee`
 and with a `triage` label. An agent must not be able to grow its own queue;
 routing stays a human decision until the orchestrator profile takes it over
-in phase 8. `pine ready --unassigned` and a board filter surface the triage
+in phase 4. `pine ready --unassigned` and a board filter surface the triage
 pile.
 
 **Tech debt is a label, not a type.** `debt` on a normal bug or feature.
@@ -491,6 +496,16 @@ and running `pine run` would be arbitrary code execution — the
 trade-off is real: a team using an in-house harness configures it once per
 machine. Trust-on-first-use could relax this later; it is not built now.
 
+**Messages and templates are untrusted input.** `.pine/messages/*.md` and
+`.pine/templates/agents/*.md` are committed text injected verbatim into run
+prompts, and the skills layer (phase 5) adds externally fetched content to
+the same channel. A cloned repository can plant instructions exactly as it
+can through `AGENTS.md` today — Pine treats all of it with the same trust
+and no more: prompt content is never executed, and the only executable
+definition remains the machine-scoped `command`. Skill updates show a
+content diff before they are applied, so a silent upstream change cannot
+become a silent injection.
+
 The existing localhost binding and Origin checks in
 `internal/server/security.go` remain and are now load-bearing.
 
@@ -513,8 +528,67 @@ delegating to a profile the user already authenticated:
 Pine spawns that profile with an orchestrator prompt and requests structured
 output. The config key and a `ContractExtension` interface are defined in this
 design; only **diff-versus-acceptance-criteria review** is scheduled for
-implementation (phase 7), because it closes the largest hole in the
+implementation (phase 4), because it closes the largest hole in the
 state-only contract: a ticked checkbox is not correct work.
+
+### Skills layer
+
+The babysit loop composes prompts from artifacts Pine already owns. What it
+cannot supply is craft: how to brainstorm a plan, how to keep tests first,
+how to keep a UI from looking templated. That knowledge exists as
+third-party agent skills — superpowers, antislop, impeccable, Vercel's web
+design guidelines — distributed through the open SKILL.md ecosystem
+(agentskills.io specification, skills.sh registry).
+
+**Pine curates and sequences; the ecosystem distributes.** Skill content is
+never vendored into this repository or the binary. Upstream skills are
+actively maintained; a fork would rot and carry attribution baggage.
+
+The trust model is identical to harness presets — project references,
+machine fetches:
+
+- Project config stores **references only**: name + pinned version, and
+  recipe membership. Committed, reviewable in a diff, never content.
+- The machine fetches and caches content under `~/.pine/skills/`; every
+  update presents a content diff before it is applied. Skills are prompt
+  injection; a silent update would be a silent injection channel.
+- Scope split mirrors the config split: method skills (how to work — TDD,
+  anti-slop) install user-global; project skills (this repository's design
+  conventions) install in-repo.
+
+```json
+"skills": {
+  "pinned":  { "antislop": "1.2.0", "find-docs": "0.3.1" },
+  "recipes": { "frontend": ["superpowers", "antislop", "impeccable", "web-design-guidelines"] }
+}
+```
+
+Recipes. `pine init --recipe frontend|backend|…` installs a deliberately
+small curated set — five to eight skills, not a bundle — and overlapping
+skills are never co-selected: one craft skill during the run, one audit
+skill at review.
+
+Skills enter the loop as a new prompt layer, chosen by where the work is:
+
+| Loop phase | Example skills | Why |
+|---|---|---|
+| Planning (before attempt 1) | brainstorm, write-plan | fills Acceptance Criteria and Implementation Plan — the sections the contract requires — for users who cannot write them alone |
+| During run | anti-slop filter, TDD discipline, find-docs | craft and accuracy while coding |
+| Review (ContractExtension) | web design guidelines, accessibility audit | judgement delegated to the reviewer profile (phase 4) |
+
+`pine skills list|add|remove` manages pins; `pine doctor` flags version
+drift and content changed since pin. No test fetches skill content; the
+resolver is faked.
+
+**Per-ticket skills.** Independently of this project-level layer, tickets
+already carry a `skills:` frontmatter field (FEAT-z35fk1): names the executing
+agent must load before starting that ticket, settable at `pine create --skill`
+and on demand later via `pine update --add-skill/--rm-skill`. Today `pine
+prompt` renders them as a Required Skills block and `pine context` flags them
+under Ready to Work — no babysitter required. When the phase-5 layer lands,
+the two compose: the effective set for a run is the phase-selected recipe set
+plus the ticket's own `skills:` (deduped), still honoring the never-co-inject
+overlap rule for same-craft skills.
 
 ### Error handling
 
@@ -577,8 +651,8 @@ tests is a fake.
 ## Build order
 
 Each phase is independently shippable and gets **its own implementation
-plan** — this spec is too large for a single plan, and phases 4 onward should
-be re-read against what phases 1–3 actually taught us before being planned.
+plan** — this spec is too large for a single plan, and phases 5 onward should
+be re-read against what phases 1–4 actually taught us before being planned.
 
 Phases 1 and 2 execute nothing, so if the supervision approach needs to
 change, everything already released still stands on its own.
@@ -589,12 +663,15 @@ change, everything already released still stands on its own.
    checks.
 3. `internal/contract`, `internal/runner`, `internal/babysit`; `pine run`,
    `pine runs`; discovered-work stamping and the `maxDiscoveries` cap.
-4. Scheduler: dependency waves, `maxConcurrent`, `pine run --ready`.
-5. Epic queue with inherited assignment.
-6. ACL-lite: `internal/agentmsg`, `pine msg`, `pine inbox`, prompt injection.
-7. Web UI: `/agents`, `/runs`, board actions, HTTP endpoints, `serveControl`.
-8. Orchestrator review (diff versus acceptance criteria) via the delegated
-   profile.
+4. Orchestrator review (diff versus acceptance criteria) via the delegated
+   profile — promoted from the tail of the old order: it closes the largest
+   hole in the state-only contract and needs nothing beyond phase 3.
+5. Skills layer: curated third-party skills, recipes, and the skills prompt
+   layer (section: Skills layer).
+6. Scheduler: dependency waves, `maxConcurrent`, `pine run --ready`.
+7. Epic queue with inherited assignment.
+8. ACL-lite: `internal/agentmsg`, `pine msg`, `pine inbox`, prompt injection.
+9. Web UI: `/agents`, `/runs`, board actions, HTTP endpoints, `serveControl`.
 
 ## Out of scope
 
