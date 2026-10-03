@@ -136,7 +136,7 @@ func newShowCmd() *cobra.Command {
 func newCreateCmd() *cobra.Command {
 	var (
 		typ, title, priority, parent, phase, verify, status, bodyFile string
-		labels, deps                                                  []string
+		labels, deps, skills                                          []string
 		asJSON                                                        bool
 	)
 	cmd := &cobra.Command{
@@ -160,7 +160,7 @@ Pine reads two of them:
 
 --json prints the created ticket as the same DTO pine show --json uses
 (id, type, title, status, priority, labels, deps, parent, phase, verify,
-links, created, updated, blocked/unmet/dangling, hash, body).
+skills, links, created, updated, blocked/unmet/dangling, hash, body).
 
 Dependencies set at creation can be rewired later with pine dep add/rm or
 pine update --add-dep/--rm-dep.`,
@@ -183,6 +183,7 @@ pine update --add-dep/--rm-dep.`,
 				Parent:   normalizeID(parent),
 				Phase:    phase,
 				Verify:   verify,
+				Skills:   skills,
 				Status:   status,
 				Body:     body,
 			})
@@ -205,6 +206,7 @@ pine update --add-dep/--rm-dep.`,
 	f.StringVar(&parent, "parent", "", "epic ticket id this belongs to")
 	f.StringVar(&phase, "phase", "", "optional phase (e.g. p0, p1, p2)")
 	f.StringVar(&verify, "verify", "", "proof command run by pine close --evidence (e.g. a grep for callers or a smoke test)")
+	f.StringSliceVar(&skills, "skill", nil, "agent skills the executing agent must load (repeatable or comma-separated)")
 	f.StringVar(&status, "status", "", "initial status (defaults to first board column)")
 	f.StringVar(&bodyFile, "body-file", "", "read the body from a file, or '-' for stdin")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
@@ -219,6 +221,7 @@ func newUpdateCmd() *cobra.Command {
 	var (
 		status, title, priority, parent, phase, verify, bodyFile string
 		addLabels, rmLabels, addDeps, rmDeps                     []string
+		addSkills, rmSkills                                      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <ID>",
@@ -227,7 +230,9 @@ func newUpdateCmd() *cobra.Command {
 
 Use --body-file <path|-> to replace the markdown body (everything after the
 frontmatter). Dependencies can be rewired with --add-dep/--rm-dep here, or via
-pine dep add/rm (both refuse cycles).`,
+pine dep add/rm (both refuse cycles). Agent skills required by the ticket are
+managed with --add-skill/--rm-skill and surfaced to the executing agent by
+pine prompt and pine context.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -298,7 +303,8 @@ pine dep add/rm (both refuse cycles).`,
 					}
 					u.Body = body
 				}
-				u.Labels = applyLabelEdits(u.Labels, addLabels, rmLabels)
+				u.Labels = applySetEdits(u.Labels, addLabels, rmLabels)
+				u.Skills = applySetEdits(u.Skills, addSkills, rmSkills)
 				return nil
 			})
 			if err != nil {
@@ -320,6 +326,8 @@ pine dep add/rm (both refuse cycles).`,
 	f.StringSliceVar(&rmDeps, "rm-dep", nil, "dependency ticket ids to remove (see also pine dep rm)")
 	f.StringSliceVar(&addLabels, "add-label", nil, "labels to add")
 	f.StringSliceVar(&rmLabels, "rm-label", nil, "labels to remove")
+	f.StringSliceVar(&addSkills, "add-skill", nil, "agent skills the executing agent must load (added to skills:)")
+	f.StringSliceVar(&rmSkills, "rm-skill", nil, "agent skills to remove from skills:")
 	return cmd
 }
 
@@ -497,6 +505,9 @@ func renderTicketDetail(w io.Writer, v view.Ticket) {
 	if len(v.Labels) > 0 {
 		fmt.Fprintf(w, "   labels: %s", strings.Join(v.Labels, ", "))
 	}
+	if len(v.Skills) > 0 {
+		fmt.Fprintf(w, "   skills: %s", strings.Join(v.Skills, ", "))
+	}
 	fmt.Fprintln(w)
 	if v.Parent != "" {
 		fmt.Fprintf(w, "parent: %s\n", v.Parent)
@@ -546,30 +557,24 @@ func depSummary(v view.Ticket) string {
 	}
 }
 
-func applyLabelEdits(labels, add, rm []string) []string {
-	set := map[string]bool{}
-	var out []string
-	for _, l := range labels {
-		if !set[l] {
-			set[l] = true
-			out = append(out, l)
-		}
-	}
-	for _, l := range add {
-		if l != "" && !set[l] {
-			set[l] = true
-			out = append(out, l)
-		}
+// applySetEdits applies add/remove edits to a string-set frontmatter field
+// (labels, skills): order-preserving dedupe, empty entries dropped, removals
+// honored. With no edits it returns the set unchanged (still deduped), so a
+// bare pine update never churns the file.
+func applySetEdits(set, add, rm []string) []string {
+	out := ticket.DedupeNonEmpty(set)
+	if len(add) > 0 {
+		out = ticket.DedupeNonEmpty(append(out, add...))
 	}
 	if len(rm) > 0 {
 		remove := map[string]bool{}
-		for _, l := range rm {
-			remove[l] = true
+		for _, v := range rm {
+			remove[v] = true
 		}
 		var filtered []string
-		for _, l := range out {
-			if !remove[l] {
-				filtered = append(filtered, l)
+		for _, v := range out {
+			if !remove[v] {
+				filtered = append(filtered, v)
 			}
 		}
 		out = filtered

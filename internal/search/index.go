@@ -21,6 +21,7 @@ type Doc struct {
 	Title        string   `json:"title"`
 	Body         string   `json:"body"`
 	Labels       []string `json:"labels"`
+	Skills       []string `json:"skills"`       // agent skills required by the ticket
 	RelatedFiles string   `json:"relatedFiles"` // space-joined file paths
 	Status       string   `json:"status"`
 	Priority     string   `json:"priority"`
@@ -240,6 +241,7 @@ func buildMapping() mapping.IndexMapping {
 	dm.AddFieldMappingsAt("body", text())
 	dm.AddFieldMappingsAt("relatedFiles", text())
 	dm.AddFieldMappingsAt("labels", kw())
+	dm.AddFieldMappingsAt("skills", kw())
 	dm.AddFieldMappingsAt("status", kw())
 	dm.AddFieldMappingsAt("priority", kw())
 	dm.AddFieldMappingsAt("type", kw())

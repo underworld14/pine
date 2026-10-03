@@ -119,14 +119,14 @@ func (srv *Server) Handler() http.Handler {
 		r.Post("/repos/{alias}/activate", srv.handleActivateRepo)
 		srv.mountStoreRoutes(r)
 
-	r.Route("/r/{alias}", func(r chi.Router) {
-		r.Use(srv.requireAlias)
-		srv.mountStoreRoutes(r)
-		// Attachments are served from the alias store so /api/r/{alias}/attachments/...
-		// resolves the right repo's files (the legacy /attachments/... route
-		// serves the active store, which is correct after a repo switch).
-		r.Get("/attachments/{id}/{name}", srv.handleServeAttachment)
-	})
+		r.Route("/r/{alias}", func(r chi.Router) {
+			r.Use(srv.requireAlias)
+			srv.mountStoreRoutes(r)
+			// Attachments are served from the alias store so /api/r/{alias}/attachments/...
+			// resolves the right repo's files (the legacy /attachments/... route
+			// serves the active store, which is correct after a repo switch).
+			r.Get("/attachments/{id}/{name}", srv.handleServeAttachment)
+		})
 	})
 
 	r.Get("/attachments/{id}/{name}", srv.handleServeAttachment)

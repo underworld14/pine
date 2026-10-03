@@ -45,6 +45,7 @@ type Ticket struct {
 	Parent   string    // epic ticket ID, or "" when none
 	Phase    string    // optional rollout phase (convention: p0, p1, p2, …)
 	Verify   string    // shell command proving the work is live (run by pine close --evidence)
+	Skills   []string  // agent skill names the executing agent must load first
 	Links    []string  // typed graph refs (ticket / LRN-* / memory/<slug> / MEMORY)
 	Created  time.Time // zero when unparseable (store fills from mtime)
 	Updated  time.Time
@@ -59,6 +60,22 @@ type Ticket struct {
 
 // Prefix returns the ID prefix (e.g. "BUG"), or "" when the ID is malformed.
 func (t *Ticket) Prefix() string { return PrefixOf(t.ID) }
+
+// DedupeNonEmpty returns in with empty entries dropped and duplicates removed,
+// preserving first-seen order. It normalizes list-shaped frontmatter fields
+// (labels, skills) on write so hand-edited files converge to a clean set.
+func DedupeNonEmpty(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range in {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
 
 // PriorityRank maps a priority to an integer using the given ordering (higher
 // means more urgent). Unknown priorities rank as "medium" if present in the

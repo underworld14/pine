@@ -15,7 +15,7 @@ import (
 var knownKeys = map[string]bool{
 	"id": true, "title": true, "status": true, "priority": true, "order": true,
 	"labels": true, "deps": true, "parent": true, "phase": true, "verify": true,
-	"links": true, "created": true, "updated": true,
+	"skills": true, "links": true, "created": true, "updated": true,
 }
 
 // Parse reads a ticket file. id is the canonical identifier taken from the
@@ -86,6 +86,10 @@ func Parse(id string, raw []byte) *Ticket {
 			t.Phase = strings.TrimSpace(val.Value)
 		case "verify":
 			t.Verify = strings.TrimSpace(val.Value)
+		case "skills":
+			t.Skills = frontmatter.DecodeStringList(val, func(msg string) {
+				t.Warnings = append(t.Warnings, "skills "+msg)
+			})
 		case "links":
 			t.Links = frontmatter.DecodeStringList(val, func(msg string) {
 				t.Warnings = append(t.Warnings, "links "+msg)
@@ -138,6 +142,9 @@ func (t *Ticket) Serialize() []byte {
 	}
 	if t.Verify != "" {
 		add("verify", frontmatter.Scalar(t.Verify))
+	}
+	if len(t.Skills) > 0 {
+		add("skills", frontmatter.Seq(t.Skills))
 	}
 	if len(t.Links) > 0 {
 		add("links", frontmatter.Seq(t.Links))

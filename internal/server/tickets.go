@@ -43,6 +43,7 @@ type createBody struct {
 	Deps     []string `json:"deps"`
 	Parent   string   `json:"parent"`
 	Phase    string   `json:"phase"`
+	Skills   []string `json:"skills"`
 	Links    []string `json:"links"`
 	Status   string   `json:"status"`
 	Body     string   `json:"body"`
@@ -64,6 +65,7 @@ func (srv *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Deps:     b.Deps,
 		Parent:   b.Parent,
 		Phase:    b.Phase,
+		Skills:   b.Skills,
 		Links:    b.Links,
 		Status:   b.Status,
 		Body:     b.Body,
@@ -105,6 +107,7 @@ type ticketPatch struct {
 	Deps     *[]string `json:"deps"`
 	Parent   *string   `json:"parent"`
 	Phase    *string   `json:"phase"`
+	Skills   *[]string `json:"skills"`
 	Links    *[]string `json:"links"`
 	Body     *string   `json:"body"`
 	OpID     string    `json:"opId"`
@@ -151,6 +154,9 @@ func (srv *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Phase != nil {
 			u.Phase = *p.Phase
+		}
+		if p.Skills != nil {
+			u.Skills = *p.Skills
 		}
 		if p.Links != nil {
 			u.Links = *p.Links

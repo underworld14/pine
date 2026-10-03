@@ -363,6 +363,52 @@ func TestUpdateFields(t *testing.T) {
 	}
 }
 
+func TestSkillsLifecycle(t *testing.T) {
+	dir := initRepo(t)
+	// Set at creation; comma-separated input dedupes.
+	run(t, dir, "create", "--type", "feature", "--title", "skilled", "--skill", "impeccable,find-docs", "--skill", "impeccable")
+	out, _ := run(t, dir, "show", "FEAT-001", "--json")
+	var v view.Ticket
+	json.Unmarshal([]byte(out), &v)
+	if len(v.Skills) != 2 || v.Skills[0] != "impeccable" || v.Skills[1] != "find-docs" {
+		t.Fatalf("skills after create = %v", v.Skills)
+	}
+
+	// Updated on demand on an already-created ticket, deduping against existing.
+	if _, err := run(t, dir, "update", "FEAT-001", "--add-skill", "antislop", "--add-skill", "find-docs"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = run(t, dir, "show", "FEAT-001", "--json")
+	json.Unmarshal([]byte(out), &v)
+	if len(v.Skills) != 3 || v.Skills[2] != "antislop" {
+		t.Fatalf("skills after --add-skill = %v", v.Skills)
+	}
+
+	// Element-wise removal; the key disappears entirely when empty.
+	if _, err := run(t, dir, "update", "FEAT-001", "--rm-skill", "antislop", "--rm-skill", "impeccable", "--rm-skill", "find-docs"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = run(t, dir, "show", "FEAT-001", "--json")
+	json.Unmarshal([]byte(out), &v)
+	if len(v.Skills) != 0 {
+		t.Fatalf("skills should be empty after --rm-skill: %v", v.Skills)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".pine", "tickets", "FEAT-001.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "skills:") {
+		t.Fatalf("empty skills should be omitted from frontmatter:\n%s", raw)
+	}
+
+	// Show (text) renders the skills meta line.
+	run(t, dir, "update", "FEAT-001", "--add-skill", "impeccable")
+	out, _ = run(t, dir, "show", "FEAT-001")
+	if !strings.Contains(out, "skills: impeccable") {
+		t.Fatalf("show should list skills:\n%s", out)
+	}
+}
+
 func TestUpdateBodyFileAndDeps(t *testing.T) {
 	dir := initRepo(t)
 	run(t, dir, "create", "--type", "feature", "--title", "dep target") // FEAT-001

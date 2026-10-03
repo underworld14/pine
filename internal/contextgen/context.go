@@ -64,6 +64,9 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 			if len(t.Labels) > 0 {
 				meta = append(meta, "Labels: "+strings.Join(t.Labels, ", "))
 			}
+			if len(t.Skills) > 0 {
+				meta = append(meta, "Required skills: "+strings.Join(t.Skills, ", "))
+			}
 			if rf := ticket.RelatedFiles(t.Body); len(rf) > 0 {
 				meta = append(meta, "Related files: "+strings.Join(rf, ", "))
 			}
@@ -200,10 +203,11 @@ func Context(s *store.Store, git gitx.Status, now time.Time) string {
 func writeConventions(b *strings.Builder, s *store.Store, memBlock string) {
 	cfg := s.Config()
 	b.WriteString("## Conventions\n")
-	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, phase, links.\n")
+	b.WriteString("- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: id, title, status, priority, labels, deps, parent, phase, verify, skills, links.\n")
 	fmt.Fprintf(b, "- Move a ticket by editing its `status` (board columns: %s).\n", strings.Join(s.Board().Statuses(), ", "))
 	b.WriteString("- `deps` lists ticket IDs that block this one; a ticket is ready when every dep is `done`.\n")
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
+	b.WriteString("- `skills` names agent skills the executing agent must load before starting the ticket; manage them with `pine update <ID> --add-skill/--rm-skill`.\n")
 	b.WriteString("- `links` lists typed graph refs (ticket IDs, `LRN-*`, `memory/<topic>`, `MEMORY`); backlinks are computed.\n")
 	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")

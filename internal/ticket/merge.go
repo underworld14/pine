@@ -11,8 +11,8 @@ import "time"
 //     if both changed differently, the side with the newer Updated wins and the
 //     divergence is flagged as a conflict (the file stays valid — git marks it
 //     unmerged so the chosen value can be reviewed).
-//   - Sets (labels/deps): base-aware union — additions from either side are
-//     kept, and a value deleted on one side is honored.
+//   - Sets (labels/deps/skills): base-aware union — additions from either side
+//     are kept, and a value deleted on one side is honored.
 //   - created = earliest known; updated = latest of the two.
 //   - Extra frontmatter keys: union by key; on a differing collision the
 //     newer-Updated side wins.
@@ -43,6 +43,7 @@ func Merge3(base, ours, theirs *Ticket) (*Ticket, bool) {
 
 	m.Labels = mergeSet(b.Labels, ours.Labels, theirs.Labels)
 	m.Deps = mergeSet(b.Deps, ours.Deps, theirs.Deps)
+	m.Skills = mergeSet(b.Skills, ours.Skills, theirs.Skills)
 	m.Links = mergeSet(b.Links, ours.Links, theirs.Links)
 
 	m.Created = earliest(base, ours.Created, theirs.Created)

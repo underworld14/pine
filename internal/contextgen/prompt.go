@@ -1,6 +1,7 @@
 package contextgen
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"text/template"
@@ -11,11 +12,20 @@ import (
 	"github.com/underworld14/pine/internal/ticket"
 )
 
+// skillsBlockTemplate renders the per-ticket required-skills section. It is
+// kept textually identical to FormatSkillsBlock so default templates and the
+// stale-template append path never drift.
+const skillsBlockTemplate = "{{if .Skills}}## Required Skills\n" +
+	"Load these skills before starting work — they are required, not optional:\n" +
+	"{{range .Skills}}- `{{.}}`\n{{end}}" +
+	"If one is not installed, try to find and install it first (skills.sh, GitHub, or your harness's skill finder such as /find-skills). If it is still unavailable, note that in the ticket's `# Notes` section and proceed carefully.\n\n{{end}}"
+
 // DefaultFixTemplate is the built-in prompt template written by pine init and
 // used when no .pine/prompts/fix.md exists.
 const DefaultFixTemplate = "# Fix Request: {{.ID}} — {{.Title}}\n\n" +
 	"## Issue\n" +
 	"Status: {{.Status}} · Priority: {{.Priority}}{{if .Labels}} · Labels: {{join .Labels \", \"}}{{end}}\n\n" +
+	skillsBlockTemplate +
 	"{{.Body}}\n\n" +
 	"## Related Files\n{{range .RelatedFiles}}- {{.}}\n{{else}}(none listed)\n{{end}}\n" +
 	"{{if .Learnings}}## Relevant Learnings\n{{range .Learnings}}- **{{.ID}}** ({{.Scope}}{{if .Tags}}, tags: {{join .Tags \", \"}}{{end}}): {{.Body}}\n{{end}}\n{{end}}" +
@@ -34,6 +44,7 @@ const DefaultFixTemplate = "# Fix Request: {{.ID}} — {{.Title}}\n\n" +
 const DefaultImplementTemplate = "# Implement: {{.ID}} — {{.Title}}\n\n" +
 	"## Task\n" +
 	"Status: {{.Status}} · Priority: {{.Priority}}{{if .Labels}} · Labels: {{join .Labels \", \"}}{{end}}\n\n" +
+	skillsBlockTemplate +
 	"{{.Body}}\n\n" +
 	"## Related Files\n{{range .RelatedFiles}}- {{.}}\n{{else}}(none listed — list candidates under a \"# Related Files\" heading in the ticket)\n{{end}}\n" +
 	"{{if .Learnings}}## Relevant Learnings\n{{range .Learnings}}- **{{.ID}}** ({{.Scope}}{{if .Tags}}, tags: {{join .Tags \", \"}}{{end}}): {{.Body}}\n{{end}}\n{{end}}" +
@@ -50,6 +61,7 @@ type PromptData struct {
 	Status       string
 	Priority     string
 	Labels       []string
+	Skills       []string
 	Body         string
 	RelatedFiles []string
 	Learnings    []LearningRef
@@ -71,6 +83,7 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 		Status:       t.Status,
 		Priority:     t.Priority,
 		Labels:       t.Labels,
+		Skills:       t.Skills,
 		Body:         strings.TrimSpace(t.Body),
 		RelatedFiles: ticket.RelatedFiles(t.Body),
 		Branch:       git.Branch,
@@ -86,12 +99,14 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 	if strings.TrimSpace(tmplText) == "" {
 		tmplText = DefaultFixTemplate
 	}
-	tmplUsesLearnings := templateReferencesLearnings(tmplText)
+	tmplUsesLearnings := templateReferences(tmplText, ".Learnings")
+	tmplUsesSkills := templateReferences(tmplText, ".Skills")
 	funcs := template.FuncMap{"join": strings.Join}
 	tmpl, err := template.New("fix").Funcs(funcs).Parse(tmplText)
 	if err != nil {
 		tmpl = template.Must(template.New("fix").Funcs(funcs).Parse(DefaultFixTemplate))
-		tmplUsesLearnings = templateReferencesLearnings(DefaultFixTemplate)
+		tmplUsesLearnings = templateReferences(DefaultFixTemplate, ".Learnings")
+		tmplUsesSkills = templateReferences(DefaultFixTemplate, ".Skills")
 	}
 	var b strings.Builder
 	if err := tmpl.Execute(&b, data); err != nil {
@@ -99,7 +114,8 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 		b.Reset()
 		fallback := template.Must(template.New("fix").Funcs(funcs).Parse(DefaultFixTemplate))
 		_ = fallback.Execute(&b, data)
-		tmplUsesLearnings = templateReferencesLearnings(DefaultFixTemplate)
+		tmplUsesLearnings = templateReferences(DefaultFixTemplate, ".Learnings")
+		tmplUsesSkills = templateReferences(DefaultFixTemplate, ".Skills")
 	}
 	out := b.String()
 	if mem := FormatMemoryBlock(s, nil, t.Labels, 2); mem != "" {
@@ -111,6 +127,9 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 	if !tmplUsesLearnings {
 		out = appendLearningsBlock(out, selected, more)
 	}
+	if !tmplUsesSkills {
+		out = appendSkillsBlock(out, t.Skills)
+	}
 	return out, nil
 }
 
@@ -119,12 +138,12 @@ func Prompt(s *store.Store, git gitx.Status, id, tmplText string) (string, error
 // false-positive templateReferencesLearnings below.
 var templateCommentRe = regexp.MustCompile(`(?s)\{\{-?\s*/\*.*?\*/\s*-?\}\}`)
 
-// templateReferencesLearnings reports whether the template already renders
-// .Learnings (so we must not inject a second block). Comments are stripped
-// first since they're never rendered.
-func templateReferencesLearnings(tmplText string) bool {
+// templateReferences reports whether the template already renders the given
+// field (e.g. ".Learnings", ".Skills") so we must not inject a second block.
+// Comments are stripped first since they're never rendered.
+func templateReferences(tmplText, field string) bool {
 	stripped := templateCommentRe.ReplaceAllString(tmplText, "")
-	return strings.Contains(stripped, ".Learnings")
+	return strings.Contains(stripped, field)
 }
 
 // appendLearningsBlock appends the learnings section for stale fix.md templates
@@ -142,4 +161,30 @@ func appendLearningsBlock(out string, selected []*learning.Learning, more int) s
 		out += "\n"
 	}
 	return out + "\n" + block
+}
+
+// FormatSkillsBlock renders the required-skills section for a ticket's
+// skills: frontmatter list. Mirrors skillsBlockTemplate verbatim.
+func FormatSkillsBlock(skills []string) string {
+	var b strings.Builder
+	b.WriteString("## Required Skills\n")
+	b.WriteString("Load these skills before starting work — they are required, not optional:\n")
+	for _, s := range skills {
+		fmt.Fprintf(&b, "- `%s`\n", s)
+	}
+	b.WriteString("If one is not installed, try to find and install it first (skills.sh, GitHub, or your harness's skill finder such as /find-skills). If it is still unavailable, note that in the ticket's `# Notes` section and proceed carefully.\n")
+	return b.String()
+}
+
+// appendSkillsBlock appends the required-skills section for stale fix.md /
+// implement.md templates that predate .Skills support, so tickets that declare
+// skills still reach the agent in repos initialized before the field existed.
+func appendSkillsBlock(out string, skills []string) string {
+	if len(skills) == 0 {
+		return out
+	}
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out + "\n" + FormatSkillsBlock(skills)
 }

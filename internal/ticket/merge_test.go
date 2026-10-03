@@ -41,6 +41,19 @@ func TestMerge3SetUnionAndDeletion(t *testing.T) {
 	}
 }
 
+func TestMerge3SkillsSet(t *testing.T) {
+	base := &Ticket{ID: "FEAT-1", Skills: []string{"antislop"}, Updated: time.Time{}}
+	ours := &Ticket{ID: "FEAT-1", Skills: []string{"antislop", "impeccable"}, Updated: time.Time{}} // added impeccable
+	theirs := &Ticket{ID: "FEAT-1", Skills: nil, Updated: time.Time{}}                              // deleted everything
+	m, conflict := Merge3(base, ours, theirs)
+	if conflict {
+		t.Error("skills set merge should not conflict")
+	}
+	if got := strings.Join(m.Skills, ","); got != "impeccable" {
+		t.Errorf("skills = %q, want impeccable (antislop deleted by theirs)", got)
+	}
+}
+
 func TestMerge3ScalarBothChangedNewerWins(t *testing.T) {
 	older := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)

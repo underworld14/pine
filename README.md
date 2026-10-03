@@ -322,6 +322,9 @@ deps:
   - FEAT-002
 parent: EPIC-001
 verify: grep -rn "renderLogin(" apps/web/src | grep -v _test
+skills:
+  - impeccable
+  - find-docs
 created: 2026-07-04T10:12:00Z
 updated: 2026-07-04T11:00:00Z
 ---
@@ -359,9 +362,20 @@ to close anyway and record the failure). Set it with `pine create --verify` /
 `pine update --verify`, or let `pine prompt`'s implement template ask the agent
 to fill one in.
 
+**skills.** `skills:` in the frontmatter names agent skills (open SKILL.md
+ecosystem names — `impeccable`, `find-docs`, …) the executing agent must load
+before starting the ticket, so you never have to invoke them manually. Every
+agent-facing surface restates them: `pine prompt <ID>` renders a **Required
+Skills** block (with the fallback: find/install the skill via skills.sh or
+GitHub, and if it stays unavailable, note that in the ticket's `# Notes` and
+proceed carefully), `pine context` flags them under Ready to Work, and
+`pine show` lists them. Set or change them at any time — including on tickets
+created long ago — with `pine create --skill <name>` and
+`pine update <ID> --add-skill <name> / --rm-skill <name>`.
+
 **JSON.** `pine list|show|ready|create --json` emit the same ticket DTO the
 HTTP API uses: `id`, `type`, `title`, `status`, `priority`, `labels`, `deps`,
-`parent`, `phase`, `verify`, `links`, `created`, `updated`, computed
+`parent`, `phase`, `verify`, `skills`, `links`, `created`, `updated`, computed
 `blocked`/`unmet`/`dangling`/`inCycle`, `epicProgress`, `acceptance`, `hash`,
 and (for `show`/`create`) the full `body`.
 

@@ -97,6 +97,26 @@ func TestHandleUpdateTicketAllFields(t *testing.T) {
 	}
 }
 
+func TestHandleTicketSkillsCreatePatchAndClear(t *testing.T) {
+	ts := newTestServer(t)
+	_, body := do(t, "POST", ts.URL+"/api/tickets", `{"type":"feature","title":"Skilled","skills":["impeccable","impeccable","find-docs"]}`, nil)
+	if !strings.Contains(body, `"skills":["impeccable","find-docs"]`) {
+		t.Fatalf("create should dedupe skills: %s", body)
+	}
+
+	// PATCH replaces the set (nil = unchanged semantics are per-field).
+	_, body = do(t, "PATCH", ts.URL+"/api/tickets/FEAT-001", `{"skills":["antislop"]}`, nil)
+	if !strings.Contains(body, `"skills":["antislop"]`) {
+		t.Fatalf("patch should replace skills: %s", body)
+	}
+
+	// Clearing sends an empty array; the response still carries the field.
+	_, body = do(t, "PATCH", ts.URL+"/api/tickets/FEAT-001", `{"skills":[]}`, nil)
+	if !strings.Contains(body, `"skills":[]`) {
+		t.Fatalf("cleared skills should serialize as an empty array: %s", body)
+	}
+}
+
 func TestHandleUpdateTicketMalformedJSON400(t *testing.T) {
 	ts := newTestServer(t)
 	do(t, "POST", ts.URL+"/api/tickets", `{"type":"bug","title":"x"}`, nil)

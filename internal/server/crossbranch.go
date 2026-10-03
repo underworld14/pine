@@ -59,9 +59,9 @@ func (srv *Server) refreshCrossBranch(ctx context.Context) (changed bool) {
 		}
 		offs = crossbranch.Compute(ctx, srv.gitClient(), srv.gitSnapshot().Branch, localIDs, crossbranch.Options{
 			Enabled:     true,
-			IDStyle:      cfg.IDStyle,
-			ActiveDays:   cfg.CrossBranch.ActiveBranchDays,
-			TicketsPath:  ticketsRel,
+			IDStyle:     cfg.IDStyle,
+			ActiveDays:  cfg.CrossBranch.ActiveBranchDays,
+			TicketsPath: ticketsRel,
 		})
 	}
 

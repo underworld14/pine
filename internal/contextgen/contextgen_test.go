@@ -425,6 +425,101 @@ func TestPromptCommentMentioningLearningsDoesNotSuppressInjection(t *testing.T) 
 	}
 }
 
+func TestPromptSkillsBlock(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(store.CreateReq{Type: "feature", Title: "Craft work", Skills: []string{"impeccable", "find-docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Prompt(s, fakeGit(), tk.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Required Skills",
+		"Load these skills before starting work — they are required, not optional:",
+		"- `impeccable`",
+		"- `find-docs`",
+		"/find-skills",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// Tickets without skills render no block — the prompt stays unchanged.
+	plain, err := s.Create(store.CreateReq{Type: "bug", Title: "Plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err = Prompt(s, fakeGit(), plain.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "Required Skills") {
+		t.Errorf("no-skills ticket should not render a skills block:\n%s", out)
+	}
+}
+
+func TestPromptInjectsSkillsWhenStaleTemplate(t *testing.T) {
+	s := scaffold(t)
+	tk, err := s.Create(store.CreateReq{Type: "bug", Title: "Skilled fix", Skills: []string{"antislop"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-skills fix.md (no .Skills field) — matches workspaces initialized
+	// before the field existed; the block must still reach the agent.
+	stale := "# Fix Request: {{.ID}} — {{.Title}}\n\n{{.Body}}\n\n## Acceptance Criteria\n- done\n"
+	out, err := Prompt(s, fakeGit(), tk.ID, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "## Required Skills") || !strings.Contains(out, "- `antislop`") {
+		t.Fatalf("stale template should still get the skills block:\n%s", out)
+	}
+
+	// A template that renders .Skills itself must not get a second block.
+	custom := "# Fix {{.ID}}\n\n{{range .Skills}}skill: {{.}}\n{{end}}{{.Body}}\n"
+	out, err = Prompt(s, fakeGit(), tk.ID, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "Required Skills") != 0 && strings.Contains(out, "## Required Skills") {
+		t.Fatalf("custom template handling .Skills must not get an injected block:\n%s", out)
+	}
+	if !strings.Contains(out, "skill: antislop") {
+		t.Fatalf("custom template should render skills itself:\n%s", out)
+	}
+}
+
+func TestContextCompactSkillsNote(t *testing.T) {
+	s := scaffold(t)
+	s.Create(store.CreateReq{Type: "feature", Title: "Needs craft", Skills: []string{"impeccable"}})
+	s.Create(store.CreateReq{Type: "bug", Title: "No skills"})
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	md := ContextCompact(s, fakeGit(), now)
+	if !strings.Contains(md, "FEAT-001 requires skills: `impeccable` — load before starting") {
+		t.Errorf("compact context missing skills note:\n%s", md)
+	}
+	// Only tickets that declare skills get a line.
+	if strings.Contains(md, "BUG-001 requires skills") {
+		t.Errorf("no-skills ticket should not get a skills note:\n%s", md)
+	}
+}
+
+func TestContextFullSkillsDetailLine(t *testing.T) {
+	s := scaffold(t)
+	s.Create(store.CreateReq{Type: "feature", Title: "High craft", Priority: "high", Skills: []string{"impeccable", "web-design-guidelines"}})
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	md := Context(s, fakeGit(), now)
+	if !strings.Contains(md, "Required skills: impeccable, web-design-guidelines") {
+		t.Errorf("full context missing Required skills meta:\n%s", md)
+	}
+	if !strings.Contains(md, "verify, skills, links") {
+		t.Errorf("conventions should list the skills key:\n%s", md)
+	}
+}
+
 func TestFormatLearningsOverflowNote(t *testing.T) {
 	ls := []*learning.Learning{
 		{ID: "LRN-001", Scope: "global", Body: "\na\n"},

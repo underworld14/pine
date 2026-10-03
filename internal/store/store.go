@@ -354,6 +354,7 @@ func cloneTicket(t *ticket.Ticket) *ticket.Ticket {
 	c := *t
 	c.Labels = append([]string(nil), t.Labels...)
 	c.Deps = append([]string(nil), t.Deps...)
+	c.Skills = append([]string(nil), t.Skills...)
 	c.Links = append([]string(nil), t.Links...)
 	c.Extra = append([]ticket.ExtraField(nil), t.Extra...)
 	c.Warnings = append([]string(nil), t.Warnings...)

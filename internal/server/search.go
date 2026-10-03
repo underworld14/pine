@@ -43,6 +43,7 @@ func docFromTicket(t *ticket.Ticket) search.Doc {
 		Title:        t.Title,
 		Body:         t.Body,
 		Labels:       t.Labels,
+		Skills:       t.Skills,
 		RelatedFiles: strings.Join(ticket.RelatedFiles(t.Body), " "),
 		Status:       t.Status,
 		Priority:     t.Priority,

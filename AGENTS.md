@@ -1,4 +1,4 @@
-<!-- pine:begin recipe=agents profile=full version=0.1.0-dev hash=937a71905286b89e -->
+<!-- pine:begin recipe=agents profile=full version=0.1.0-dev hash=edda8fe57b867800 -->
 This project uses Pine for issue tracking.
 
 ## Pine issue tracking
@@ -8,8 +8,8 @@ This repository uses [Pine](https://github.com/underworld14/pine) — git-native
 ### Always do
 
 - Track work with **Pine tickets** — do **not** use markdown TODO lists for issue tracking.
-- Start with `pine context`; pick work with `pine ready`.
-- Planning a non-trivial change? `pine create --type feature --title "…"` first, move it to `doing`, and when done `pine close <ID> --evidence` (marks done + attaches the file-change evidence). Run `pine inject` for a compact agent prompt-injector.
+- Start with `pine context` (compact briefing by default; `--full` for everything); pick work with `pine ready`.
+- Planning a non-trivial change? `pine create --type feature --title "…"` first, move it to `doing`, and when done `pine close <ID> --evidence` (runs the ticket's `verify:` proof command — refusing to close when it fails — then marks done and attaches the file-change evidence). Run `pine inject` for a compact agent prompt-injector.
 - Write progress back to `.pine/tickets/<ID>.md` (or `pine update` / `pine close`). Move tickets by editing `status` (board columns: todo, doing, testing, done).
 - Capture durable insights with `pine learn "…"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (not a new LRN file per ticket). Use `--scope ticket` only for ephemeral ticket notes.
 - Preferences that apply in **every** repo (your tools, style, habits) belong in your machine-wide memory: `pine learn -g "…"` → `~/.pine/`. Project memory wins on conflict.

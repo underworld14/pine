@@ -265,3 +265,59 @@ updated: 2026-07-04T11:00:00Z
 		t.Errorf("round-trip links = %v", tk2.Links)
 	}
 }
+
+func TestParseSkillsRoundTrip(t *testing.T) {
+	raw := `---
+id: FEAT-020
+title: Skilled work
+status: todo
+priority: medium
+verify: go test ./...
+skills:
+    - impeccable
+    - find-docs
+links:
+    - MEMORY
+created: 2026-07-04T10:12:00Z
+updated: 2026-07-04T11:00:00Z
+---
+
+# Description
+`
+	tk := Parse("FEAT-020", []byte(raw))
+	if tk.Degraded {
+		t.Fatalf("degraded: %v", tk.Warnings)
+	}
+	if len(tk.Skills) != 2 || tk.Skills[0] != "impeccable" || tk.Skills[1] != "find-docs" {
+		t.Fatalf("skills = %v", tk.Skills)
+	}
+	out := string(tk.Serialize())
+	// skills sits between verify and links in canonical order.
+	vi, si, li := strings.Index(out, "verify:"), strings.Index(out, "skills:"), strings.Index(out, "links:")
+	if !(vi < si && si < li) {
+		t.Fatalf("skills not between verify and links:\n%s", out)
+	}
+	if !strings.Contains(out, "- impeccable") || !strings.Contains(out, "- find-docs") {
+		t.Errorf("serialize missing skills:\n%s", out)
+	}
+	tk2 := Parse("FEAT-020", []byte(out))
+	if len(tk2.Skills) != 2 || tk2.Skills[1] != "find-docs" {
+		t.Errorf("round-trip skills = %v", tk2.Skills)
+	}
+	tk.Skills = nil
+	cleared := string(tk.Serialize())
+	if strings.Contains(cleared, "skills:") {
+		t.Fatalf("empty skills should be omitted:\n%s", cleared)
+	}
+}
+
+func TestParseSkillsScalarWrapped(t *testing.T) {
+	src := "---\nid: FEAT-021\ntitle: t\nstatus: todo\npriority: low\nskills: antislop\ncreated: 2026-07-04T00:00:00Z\nupdated: 2026-07-04T00:00:00Z\n---\nb\n"
+	tk := Parse("FEAT-021", []byte(src))
+	if len(tk.Skills) != 1 || tk.Skills[0] != "antislop" {
+		t.Errorf("skills = %v", tk.Skills)
+	}
+	if len(tk.Warnings) == 0 {
+		t.Errorf("expected a warning about scalar skills")
+	}
+}

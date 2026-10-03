@@ -29,6 +29,7 @@ type CreateReq struct {
 	Parent   string
 	Phase    string
 	Verify   string
+	Skills   []string
 	Links    []string
 	Status   string
 	Body     string
@@ -77,10 +78,12 @@ func (s *Store) Create(req CreateReq) (*ticket.Ticket, error) {
 		Parent:   req.Parent,
 		Phase:    req.Phase,
 		Verify:   req.Verify,
-		Links:    req.Links,
-		Created:  now,
-		Updated:  now,
-		Body:     body,
+		// Dedupe (covers comma-separated CLI input and API clients).
+		Skills:  ticket.DedupeNonEmpty(req.Skills),
+		Links:   req.Links,
+		Created: now,
+		Updated: now,
+		Body:    body,
 	}
 	if err := s.saveTicket(t); err != nil {
 		// Clean up the empty O_EXCL reservation so a failed write does not leave a

@@ -10,7 +10,7 @@ This repository uses [Pine](https://github.com/underworld14/pine) — git-native
 ## Workflow
 
 1. Find work: `pine ready` (or `pine ready --json` for scripts).
-2. Understand a ticket: `pine show <ID>` or `pine prompt <ID>`.
+2. Understand a ticket: `pine show <ID>` or `pine prompt <ID>`. If the ticket declares `skills:`, load those skills before starting work.
 3. Fix the code in the normal source tree.
 4. Write back: edit `.pine/tickets/<ID>.md` (update `status`, add fix notes) or use `pine update` / `pine close`.
 5. Run `pine doctor` before committing (add `--fix` to auto-repair mechanical issues).
@@ -65,6 +65,7 @@ pine list [--all] [--json]       # open tickets by default; --all includes done
 pine log <ID> [--json]           # commits that reference or touch this ticket
 pine create / update / close     # CLI mutations
 pine update <ID> --body-file f   # replace the markdown body (or '-' for stdin)
+pine update <ID> --add-skill x / --rm-skill x   # manage the ticket's required skills
 pine dep add <ID> <DEP>… / rm    # rewire dependencies after creation (refuses cycles)
 pine close <ID> --evidence       # run verify:, attach evidence, mark done
 pine learn "<insight>"           # capture a durable cross-agent learning
@@ -75,11 +76,12 @@ pine doctor [--fix]              # health check; --fix repairs mechanical issues
 
 ## Write-back rules
 
-- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: `id`, `title`, `status`, `priority`, `labels`, `deps`, `parent`, `phase`, `verify`, `links`.
+- Tickets live in `.pine/tickets/*.md` with YAML frontmatter: `id`, `title`, `status`, `priority`, `labels`, `deps`, `parent`, `phase`, `verify`, `skills`, `links`.
 - Move a ticket on the board by editing its `status` (board columns: todo, doing, testing, done).
 - `deps` lists ticket IDs that block this one; a ticket is **ready** when every dep is `done`. Rewire them with `pine dep add/rm` or `pine update --add-dep/--rm-dep` — no need to create tickets in dependency order.
 - `parent` points at an EPIC ticket for grouping.
 - `verify:` is a shell command proving the work is live (grep for callers, smoke test); `pine close --evidence` runs it and refuses to close on failure.
+- `skills:` names agent skills the executing agent must load before starting the ticket — the user should not have to invoke them manually. Manage with `pine update <ID> --add-skill <name>` / `--rm-skill <name>`; `pine prompt` and `pine context` restate them. If a required skill is missing on the machine, try to find/install it (skills.sh, GitHub, or a skill finder like `/find-skills`); if it stays unavailable, note that in the ticket's `# Notes` and proceed carefully.
 - The body uses `#`-level sections. Pine reads `# Acceptance Criteria` (checkboxes drive progress) and `# Related Files` — one bullet per repo-relative path, annotation after the path is fine:
   ```markdown
   # Related Files

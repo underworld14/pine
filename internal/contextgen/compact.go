@@ -68,6 +68,13 @@ func ContextCompact(s *store.Store, git gitx.Status, now time.Time) string {
 	if len(ready) > 0 {
 		b.WriteString("## Ready to Work (unblocked)\n")
 		writeTable(&b, ready)
+		// Skill requirements ride along only when declared, so the compact
+		// context stays zero-cost for tickets that name none.
+		for _, t := range ready {
+			if len(t.Skills) > 0 {
+				fmt.Fprintf(&b, "- %s requires skills: %s — load before starting\n", t.ID, codeList(t.Skills, 4))
+			}
+		}
 		b.WriteString("\n")
 	}
 
