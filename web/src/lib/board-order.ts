@@ -23,7 +23,9 @@ export function defaultCompare(a: Ticket, b: Ticket): number {
   if (pa !== pb) return pb - pa;
   const ua = a.updated ?? '';
   const ub = b.updated ?? '';
-  if (ua !== ub) return ub.localeCompare(ua);
+  // ISO-8601 timestamps order correctly as plain strings; this is the hot path of
+  // every column sort, where localeCompare is several times slower.
+  if (ua !== ub) return ua < ub ? 1 : -1;
   return a.id.localeCompare(b.id);
 }
 
@@ -131,4 +133,60 @@ export function dropOrderInColumn(
     return null; // unchanged order (same-column no-op or cancelled drag)
   }
   return dropOrderFor(arranged, movedId);
+}
+
+// --- Column cap -------------------------------------------------------------
+// A column renders at most a "page" of cards at a time (the rest sit behind a
+// "Show N more" button) so a repo with hundreds of tickets in one status doesn't
+// mount hundreds of dnd-managed cards. Pure so it can be unit-tested; the board
+// page owns the per-column expanded state.
+
+export const COLUMN_PAGE = 50;
+
+export interface ColumnSlice<T> {
+  items: T[]; // the rendered cards: the first `limit` of the column
+  total: number; // every card matching the filter (what the header badge shows)
+}
+
+// capColumn returns the first `limit` cards plus the full count.
+export function capColumn<T>(all: T[], limit: number = COLUMN_PAGE): ColumnSlice<T> {
+  return { items: all.length > limit ? all.slice(0, limit) : all, total: all.length };
+}
+
+// revealNext grows a column's limit by one page.
+export function revealNext(limit: number = COLUMN_PAGE): number {
+  return limit + COLUMN_PAGE;
+}
+
+// hiddenCount is how many cards sit behind the "Show more" button.
+export function hiddenCount(slice: ColumnSlice<unknown>): number {
+  return slice.total - slice.items.length;
+}
+
+// sameRefs reports whether two lists hold the same objects in the same order.
+export function sameRefs<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+export interface BoardColumn {
+  status: string;
+  title: string;
+  total: number;
+  items: Ticket[];
+}
+
+// reuseColumns keeps the previous column object whenever nothing visible about it
+// changed (same status/title/count and the very same ticket objects in the same
+// order). Handing the board the same object means its keyed {#each} and the
+// dndzone action see no change, so an untouched column isn't reconfigured or
+// re-flipped when another column — or the filter — changes.
+export function reuseColumns(prev: readonly BoardColumn[], next: BoardColumn[]): BoardColumn[] {
+  const byStatus = new Map(prev.map((c) => [c.status, c]));
+  return next.map((c) => {
+    const p = byStatus.get(c.status);
+    return p && p.title === c.title && p.total === c.total && sameRefs(p.items, c.items) ? p : c;
+  });
 }

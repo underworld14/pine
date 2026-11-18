@@ -41,6 +41,8 @@ export interface Ticket {
   acceptance?: { done: number; total: number };
   hash: string;
   degraded?: boolean;
+  // Markdown body. undefined = not loaded yet: the snapshot omits bodies (see
+  // workspace.ensureBody), so never treat a missing body as an empty one.
   body?: string;
   attachments: Attachment[];
   // Cross-branch provenance. source is 'local' for the checked-out working tree
@@ -190,7 +192,9 @@ async function req<T>(method: string, path: string, body?: unknown, headers: Rec
 }
 
 export const api = {
-  snapshot: () => req<Snapshot>('GET', '/api/snapshot'),
+  // Bodies are the bulk of the payload and only the detail views read them, so
+  // they are lazy-loaded via getTicket (off-branch tickets still ship theirs).
+  snapshot: () => req<Snapshot>('GET', '/api/snapshot?bodies=0'),
   createTicket: (input: Record<string, unknown>) => req<Ticket>('POST', '/api/tickets', input),
   getTicket: (id: string) => req<Ticket>('GET', `/api/tickets/${id}`),
   patchTicket: (id: string, patch: Record<string, unknown>, ifMatch?: string) =>

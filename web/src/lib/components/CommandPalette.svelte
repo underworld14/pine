@@ -38,7 +38,13 @@
   $effect(() => {
     if (ui.paletteOpen) { query = ''; active = 0; queueMicrotask(() => inputEl?.focus()); }
   });
-  $effect(() => { active = 0; void results; });
+  // Reset the highlight when the results change — but only while open: reading
+  // `results` here when closed would re-run its filter + sort on every ticket change.
+  $effect(() => {
+    if (!ui.paletteOpen) return;
+    active = 0;
+    void results;
+  });
 
   function run(i: number) {
     const item = results[i];

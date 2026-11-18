@@ -14,7 +14,8 @@
 
   onMount(() => {
     ui.initTheme();
-    workspace.hydrate().catch(() => {});
+    // The event stream's open handler does the initial snapshot load (with a
+    // fallback inside startLive), so we don't fetch it a second time here.
     workspace.startLive();
     return () => workspace.stopLive();
   });

@@ -7,7 +7,14 @@ import {
   sortByEffective,
   computeDropOrder,
   dropOrderFor,
-  dropOrderInColumn
+  dropOrderInColumn,
+  COLUMN_PAGE,
+  capColumn,
+  revealNext,
+  hiddenCount,
+  sameRefs,
+  reuseColumns,
+  type BoardColumn
 } from './board-order';
 import type { Ticket } from './api';
 
@@ -153,5 +160,136 @@ describe('dropOrderFor', () => {
   });
   it('returns null when the id is absent (source zone of a cross-column drag)', () => {
     expect(dropOrderFor([mk('a'), mk('b')], 'zzz')).toBeNull();
+  });
+});
+
+describe('defaultCompare date ordering', () => {
+  it('orders ISO timestamps newest first with a plain string compare', () => {
+    const a = mk('a', { updated: '2026-07-04T10:00:00Z' });
+    const b = mk('b', { updated: '2026-07-04T10:00:01Z' });
+    expect(defaultCompare(a, b)).toBeGreaterThan(0);
+    expect(defaultCompare(b, a)).toBeLessThan(0);
+    // A missing timestamp sorts last.
+    expect(defaultCompare(mk('c', { updated: '' }), a)).toBeGreaterThan(0);
+  });
+});
+
+describe('capColumn', () => {
+  const cards = (n: number) => Array.from({ length: n }, (_, i) => mk('t-' + i));
+
+  it('renders everything when the column fits one page', () => {
+    const all = cards(COLUMN_PAGE);
+    const s = capColumn(all);
+    expect(s.items).toBe(all);
+    expect(s.total).toBe(COLUMN_PAGE);
+    expect(hiddenCount(s)).toBe(0);
+  });
+
+  it('keeps the first page and reports the full total', () => {
+    const all = cards(120);
+    const s = capColumn(all);
+    expect(s.items.map((t) => t.id)).toEqual(all.slice(0, COLUMN_PAGE).map((t) => t.id));
+    expect(s.total).toBe(120);
+    expect(hiddenCount(s)).toBe(120 - COLUMN_PAGE);
+  });
+
+  it('reveals one page at a time until nothing is hidden', () => {
+    const all = cards(120);
+    let limit = COLUMN_PAGE;
+    limit = revealNext(limit);
+    expect(capColumn(all, limit).items).toHaveLength(2 * COLUMN_PAGE);
+    limit = revealNext(limit);
+    const last = capColumn(all, limit);
+    expect(last.items).toHaveLength(120);
+    expect(hiddenCount(last)).toBe(0);
+  });
+
+  it('handles an empty column', () => {
+    expect(capColumn([])).toEqual({ items: [], total: 0 });
+  });
+});
+
+describe('dropping into a capped column', () => {
+  // 120 floating cards, all in `todo`: the board renders only the first 50.
+  const full = Array.from({ length: 120 }, (_, i) =>
+    mk('t-' + String(i).padStart(3, '0'), { updated: `2026-07-04T${String(23 - Math.floor(i / 6)).padStart(2, '0')}:00:00Z` })
+  );
+  const sorted = sortByEffective(full);
+  const visible = capColumn(sorted).items;
+
+  it('slots a card dropped at the end of the visible page just above the first hidden card', () => {
+    const lastVisible = visible[visible.length - 1];
+    const firstHidden = sorted[visible.length];
+    const moved = sorted[0];
+    // The dndzone only knows the slice: the card now sits under the last visible card.
+    const order = dropOrderInColumn(sorted, moved.id, lastVisible.id) as number;
+    const keys = effectiveKeys(sorted.filter((t) => t.id !== moved.id));
+    expect(order).toBeGreaterThan(keys.get(lastVisible.id)!);
+    expect(order).toBeLessThan(keys.get(firstHidden.id)!);
+  });
+
+  it('keeps a card dropped at the top of the page above everything, hidden cards included', () => {
+    const moved = sorted[10];
+    const order = dropOrderInColumn(sorted, moved.id, null) as number;
+    const keys = effectiveKeys(sorted.filter((t) => t.id !== moved.id));
+    expect(order).toBeLessThan(Math.min(...keys.values()));
+  });
+
+  it('persists nothing when the dropped slice is unchanged (cancelled drag)', () => {
+    const moved = visible[3];
+    expect(dropOrderInColumn(sorted, moved.id, visible[2].id)).toBeNull();
+  });
+
+  it('lets a card from another column land inside the capped page', () => {
+    const incoming = mk('other-1', { status: 'doing' });
+    const order = dropOrderInColumn(sorted, incoming.id, visible[4].id) as number;
+    const keys = effectiveKeys(sorted);
+    expect(order).toBeGreaterThan(keys.get(visible[4].id)!);
+    expect(order).toBeLessThan(keys.get(sorted[5].id)!);
+  });
+});
+
+describe('sameRefs / reuseColumns', () => {
+  const t1 = mk('a');
+  const t2 = mk('b');
+
+  function col(status: string, items: Ticket[], extra: Partial<BoardColumn> = {}): BoardColumn {
+    return { status, title: status, total: items.length, items, ...extra };
+  }
+
+  it('sameRefs compares identity and order, not content', () => {
+    expect(sameRefs([t1, t2], [t1, t2])).toBe(true);
+    expect(sameRefs([t1, t2], [t2, t1])).toBe(false);
+    expect(sameRefs([t1], [{ ...t1 }])).toBe(false);
+    expect(sameRefs([t1], [t1, t2])).toBe(false);
+  });
+
+  it('reuses an unchanged column and replaces only the changed one', () => {
+    const prev = [col('todo', [t1]), col('doing', [t2])];
+    const next = [col('todo', [t1]), col('doing', [t2, mk('c')])];
+    const out = reuseColumns(prev, next);
+    expect(out[0]).toBe(prev[0]); // same object → dndzone is not reconfigured
+    expect(out[1]).toBe(next[1]);
+  });
+
+  it('does not reuse a column whose ticket object was replaced', () => {
+    const prev = [col('todo', [t1])];
+    const next = [col('todo', [{ ...t1, title: 'renamed' }])];
+    expect(reuseColumns(prev, next)[0]).toBe(next[0]);
+  });
+
+  it('does not reuse when the count or title changed even if cards are the same', () => {
+    const prev = [col('todo', [t1])];
+    expect(reuseColumns(prev, [col('todo', [t1], { total: 9 })])[0].total).toBe(9);
+    expect(reuseColumns(prev, [col('todo', [t1], { title: 'Backlog' })])[0].title).toBe('Backlog');
+  });
+
+  it('matches by status, so a reordered or new column still reuses its twin', () => {
+    const prev = [col('todo', [t1]), col('doing', [t2])];
+    const next = [col('doing', [t2]), col('todo', [t1]), col('done', [])];
+    const out = reuseColumns(prev, next);
+    expect(out[0]).toBe(prev[1]);
+    expect(out[1]).toBe(prev[0]);
+    expect(out[2]).toBe(next[2]);
   });
 });

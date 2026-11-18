@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileEditor } from './ticket-editor';
+import { bodyPending, initialEditorState, reconcileEditor } from './ticket-editor';
 import type { Ticket } from './api';
 
 function mk(body: string, hash: string): Ticket {
@@ -67,5 +67,38 @@ describe('reconcileEditor', () => {
     });
     expect(r.text).toBe('unsaved draft');
     expect(r.conflict).toBe(ticket);
+  });
+});
+
+describe('body not loaded yet (lazy snapshot bodies)', () => {
+  function pending(hash: string): Ticket {
+    const t = mk('', hash);
+    delete t.body;
+    return t;
+  }
+
+  it('bodyPending: only an undefined body on an editable ticket', () => {
+    expect(bodyPending({ body: undefined })).toBe(true);
+    expect(bodyPending({ body: '' })).toBe(false); // empty is loaded
+    expect(bodyPending({ body: undefined, readOnly: true })).toBe(false); // off-branch: never lazy
+  });
+
+  it('initialEditorState refuses to seed a buffer from a pending body', () => {
+    expect(initialEditorState(pending('h1'))).toBeNull();
+    expect(initialEditorState(mk('hello', 'h1'))).toEqual({ text: 'hello', baseBody: 'hello', baseHash: 'h1' });
+    expect(initialEditorState(mk('', 'h1'))).toEqual({ text: '', baseBody: '', baseHash: 'h1' });
+  });
+
+  it('reconcileEditor never adopts "" from a body-less ticket whose hash changed', () => {
+    const clean = reconcileEditor({ text: 'old', baseBody: 'old', baseHash: 'h1', ticket: pending('h2') });
+    expect(clean).toEqual({ text: 'old', baseBody: 'old', baseHash: 'h1', conflict: null });
+    const dirty = reconcileEditor({ text: 'draft', baseBody: 'old', baseHash: 'h1', ticket: pending('h2') });
+    expect(dirty).toEqual({ text: 'draft', baseBody: 'old', baseHash: 'h1', conflict: null });
+  });
+
+  it('reconciles normally once the body arrives', () => {
+    const r = reconcileEditor({ text: 'old', baseBody: 'old', baseHash: 'h1', ticket: mk('new', 'h2') });
+    expect(r.text).toBe('new');
+    expect(r.baseHash).toBe('h2');
   });
 });

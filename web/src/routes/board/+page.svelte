@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { workspace } from '$lib/workspace.svelte';
   import { ui } from '$lib/ui.svelte';
   import { toasts } from '$lib/toast.svelte';
@@ -8,8 +9,22 @@
   import QuickPeekPopover from '$lib/components/QuickPeekPopover.svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
-  import { dropOrderInColumn } from '$lib/board-order';
-  import { emptyFilter, isActive, matchesFilter, type BoardFilter } from '$lib/board-filter';
+  import {
+    COLUMN_PAGE,
+    capColumn,
+    dropOrderInColumn,
+    revealNext,
+    reuseColumns,
+    type BoardColumn
+  } from '$lib/board-order';
+  import {
+    TEXT_DEBOUNCE_MS,
+    emptyFilter,
+    isActive,
+    isTextOnlyChange,
+    matchesFilter,
+    type BoardFilter
+  } from '$lib/board-filter';
   import type { Ticket } from '$lib/api';
 
   // Honor reduced-motion for the reorder/move animations too (CSS transitions are
@@ -19,24 +34,59 @@
   const FLIP = reduce ? 0 : 200;
 
   let dragging = $state(false);
+  // `filter` is what the bar shows (updates per keystroke); `applied` is what the
+  // columns are filtered by. Typing reaches `applied` after a short pause so each
+  // keystroke doesn't rebuild every column; label/priority clicks apply at once.
   let filter = $state<BoardFilter>(emptyFilter());
+  let applied = $state<BoardFilter>(emptyFilter());
+  let applyTimer: ReturnType<typeof setTimeout> | null = null;
   let peek = $state<{ ticket: Ticket; anchor: DOMRect } | null>(null);
 
+  function onFilterChange(next: BoardFilter) {
+    // Emptying the box (backspacing it out, or "Clear filter") applies at once.
+    const typing = next.text.trim() !== '' && isTextOnlyChange(filter, next);
+    filter = next;
+    if (applyTimer) clearTimeout(applyTimer);
+    applyTimer = null;
+    if (typing) {
+      applyTimer = setTimeout(() => {
+        applyTimer = null;
+        applied = filter;
+      }, TEXT_DEBOUNCE_MS);
+    } else {
+      applied = next;
+    }
+  }
+  $effect(() => () => {
+    if (applyTimer) clearTimeout(applyTimer);
+  });
+
+  // How many cards each column (by status) has revealed; unset = the first page.
+  let limits = $state<Record<string, number>>({});
+
   // Local, filtered view of columns so drag operations feel instant; reconciled
-  // from the store whenever we're not mid-drag.
-  let cols = $state<{ status: string; title: string; items: Ticket[] }[]>([]);
+  // from the store whenever we're not mid-drag. Each column holds only the capped
+  // slice the dndzone manages; `total` is the full matching count for the badge.
+  let cols = $state<BoardColumn[]>([]);
   $effect(() => {
     if (dragging) return;
-    const f = filter;
-    cols = workspace.columns.map((c) => ({
-      status: c.status,
-      title: c.title,
-      items: c.tickets.filter((t) => matchesFilter(t, f))
-    }));
+    const f = applied;
+    const lim = limits;
+    const active = isActive(f);
+    const next = workspace.columns.map((c) => {
+      const slice = capColumn(active ? c.tickets.filter((t) => matchesFilter(t, f)) : c.tickets, lim[c.status]);
+      return { status: c.status, title: c.title, total: slice.total, items: slice.items };
+    });
+    // Untracked: this effect writes `cols`, so it must not also depend on it.
+    const merged = untrack(() => {
+      const m = reuseColumns(cols, next);
+      return m.length === cols.length && m.every((c, i) => c === cols[i]) ? null : m;
+    });
+    if (merged) cols = merged;
   });
 
   const labels = $derived(workspace.allLabels());
-  const filtering = $derived(isActive(filter));
+  const filtering = $derived(isActive(applied));
 
   // Close the quick-peek popover if its ticket disappears (deleted elsewhere).
   $effect(() => {
@@ -101,7 +151,7 @@
 
 <div class="flex h-full flex-col">
   {#if workspace.hydrated}
-    <BoardFilterBar {filter} {labels} onChange={(f) => (filter = f)} />
+    <BoardFilterBar {filter} {labels} onChange={onFilterChange} />
   {/if}
 
   <div class="flex flex-1 items-start gap-3 overflow-x-auto p-4" data-testid="board">
@@ -122,7 +172,7 @@
         >
           <header class="flex items-center gap-2 px-3 py-2.5 text-[12px] font-semibold uppercase tracking-wide text-dim">
             <span>{col.title}</span>
-            <span class="rounded-full bg-surface-2 px-[7px] text-[11px]">{col.items.length}</span>
+            <span class="rounded-full bg-surface-2 px-[7px] text-[11px]" data-testid={`col-count-${col.status}`}>{col.total}</span>
             <button
               class="ml-auto border-0 bg-transparent text-[16px] leading-none text-dim hover:text-text"
               title="New in {col.title}"
@@ -157,6 +207,18 @@
             <div class="px-3 pb-1 pt-1 text-[11px] text-dim" data-testid={`col-empty-${col.status}`}>
               {filtering ? 'No matching cards' : 'No cards yet'}
             </div>
+          {/if}
+
+          {#if col.total > col.items.length && !dragging}
+            <button
+              type="button"
+              class="mx-2.5 mb-1 mt-1 rounded-md border border-border bg-transparent py-1.5 text-[11px] text-dim hover:border-accent hover:text-text"
+              data-testid={`col-more-${col.status}`}
+              onclick={() => (limits = { ...limits, [col.status]: revealNext(limits[col.status] ?? COLUMN_PAGE) })}
+            >
+              Show {Math.min(COLUMN_PAGE, col.total - col.items.length)} more
+              <span class="text-dim">· {col.total - col.items.length} hidden</span>
+            </button>
           {/if}
 
           <div class="px-2.5 pb-3 pt-1">

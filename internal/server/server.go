@@ -112,6 +112,9 @@ func (srv *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(securityMiddleware)
+	// JSON only: the SSE stream (text/event-stream) must flush unbuffered, and
+	// the embedded assets are small and cacheable.
+	r.Use(middleware.Compress(5, "application/json"))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", srv.handleHealth)
@@ -170,16 +173,24 @@ func (srv *Server) requireAlias(next http.Handler) http.Handler {
 	})
 }
 
+// handleSnapshot returns every ticket plus board, config and git state. With
+// ?bodies=0 (or false) local tickets omit their markdown body — the web UI
+// loads a body on demand — which keeps the payload small for repos with
+// hundreds of long tickets. Each ticket's hash stays so a client can tell when
+// a loaded body is stale. Off-branch overlay tickets always keep their body:
+// they are not in the working tree, so GET /api/tickets/{id} cannot serve them.
 func (srv *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	st := srv.storeOf(r)
-	tickets := view.BuildAll(st, true)
-	board := buildBoardFor(st, nil)
+	bodies := r.URL.Query().Get("bodies")
+	tickets := view.BuildAll(st, bodies != "0" && bodies != "false")
+	var board boardResp
 	git := gitx.Status{}
 	if srv.isActiveStore(st) {
 		tickets = srv.appendOverlay(tickets, nil)
 		board = srv.buildBoard()
 		git = srv.gitSnapshot()
 	} else {
+		board = buildBoardFor(st, nil)
 		ctx, cancel := context.WithTimeout(r.Context(), gitTimeout)
 		defer cancel()
 		git = gitx.New(filepath.Dir(st.Root())).Snapshot(ctx, gitCommitLimit)

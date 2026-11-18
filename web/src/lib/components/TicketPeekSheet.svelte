@@ -7,7 +7,7 @@
   import { priorityMeta, labelColor } from '$lib/ui-helpers';
   import { renderMarkdown } from '$lib/markdown';
   import { bytes } from '$lib/format';
-  import { reconcileEditor } from '$lib/ticket-editor';
+  import { bodyPending, initialEditorState, reconcileEditor } from '$lib/ticket-editor';
   import {
     insertAtCursor,
     replaceAll,
@@ -34,9 +34,12 @@
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
   let mode = $state<'preview' | 'edit'>('preview');
   let text = $state('');
+  // baseHash === '' means the buffer was never seeded from a loaded body, so
+  // `text` is not the ticket's body and must not be saved.
   let baseHash = $state('');
   let baseBody = $state('');
   let dirty = $derived(text !== baseBody);
+  let bodyFailed = $state(false);
   let conflict = $state<Ticket | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let labelInput = $state('');
@@ -44,7 +47,7 @@
   let lastTicketId = '';
 
   async function save(force = false) {
-    if (!t || readOnly) return;
+    if (!t || readOnly || baseHash === '') return;
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
@@ -53,7 +56,7 @@
     const opId = workspace.beginOp();
     try {
       const updated = await api.patchTicket(t.id, { body: text, opId }, ifMatch);
-      workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+      workspace.put(updated);
       baseHash = updated.hash;
       baseBody = updated.body ?? '';
       conflict = null;
@@ -73,7 +76,7 @@
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    if (dirty && !conflict && !readOnly && t) {
+    if (dirty && !conflict && !readOnly && t && baseHash !== '') {
       await save();
     }
   }
@@ -92,7 +95,7 @@
   }
 
   async function startEdit() {
-    if (readOnly) return;
+    if (readOnly || baseHash === '') return;
     mode = 'edit';
     await tick();
     textareaEl?.focus();
@@ -111,13 +114,13 @@
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    if (dirty && !conflict && !readOnly && t) {
+    if (dirty && !conflict && !readOnly && t && baseHash !== '') {
       const id = t.id;
       const body = text;
       const hash = baseHash;
       const opId = workspace.beginOp();
       void api.patchTicket(id, { body, opId }, hash).then((updated) => {
-        workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+        workspace.put(updated);
       }).catch(() => {
         /* best-effort on unmount */
       });
@@ -129,35 +132,52 @@
     dialogEl?.focus();
   });
 
-  // Load / rebase body when the ticket identity or disk version changes.
+  // Snapshots omit bodies: fetch this ticket's on open, and again if a resync
+  // drops it because the file changed.
+  function loadBody(tid: string) {
+    bodyFailed = false;
+    workspace.ensureBody(tid).catch(() => {
+      if (tid === ticketId) bodyFailed = true;
+    });
+  }
+  $effect(() => {
+    const ticket = t;
+    if (ticket && bodyPending(ticket)) loadBody(ticket.id);
+  });
+  const loading = $derived(!!t && bodyPending(t) && baseHash === '');
+
+  // Load / rebase body when the ticket identity or disk version changes. While the
+  // body is still loading the buffer stays unseeded: `body ?? ''` here would turn
+  // "not loaded" into "empty" and the next autosave would wipe the ticket.
   $effect(() => {
     const ticket = t;
     if (!ticket) return;
     if (ticket.id !== lastTicketId) {
       // Flush the previous ticket before swapping editor buffers.
-      if (lastTicketId && dirty && !conflict) {
+      if (lastTicketId && dirty && !conflict && baseHash !== '') {
         const prevId = lastTicketId;
         const prevBody = text;
         const prevHash = baseHash;
         const opId = workspace.beginOp();
         void api.patchTicket(prevId, { body: prevBody, opId }, prevHash).then((updated) => {
-          workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+          workspace.put(updated);
         }).catch(() => {
           /* best-effort on switch */
         });
       }
       lastTicketId = ticket.id;
-      text = ticket.body ?? '';
-      baseBody = ticket.body ?? '';
-      baseHash = ticket.hash;
+      text = '';
+      baseBody = '';
+      baseHash = '';
       conflict = null;
       mode = 'preview';
-      return;
     }
     if (baseHash === '') {
-      text = ticket.body ?? '';
-      baseBody = ticket.body ?? '';
-      baseHash = ticket.hash;
+      const init = initialEditorState(ticket);
+      if (!init) return;
+      text = init.text;
+      baseBody = init.baseBody;
+      baseHash = init.baseHash;
       return;
     }
     if (ticket.hash !== baseHash) {
@@ -208,12 +228,12 @@
     text = disk.body ?? '';
     baseBody = disk.body ?? '';
     baseHash = disk.hash;
-    workspace.tickets = { ...workspace.tickets, [disk.id]: disk };
+    workspace.put(disk);
     conflict = null;
   }
 
   async function uploadFiles(files: File[]) {
-    if (!files.length || readOnly || !t) return;
+    if (!files.length || readOnly || !t || baseHash === '') return;
     const fromPreview = mode === 'preview';
     if (fromPreview) await startEdit();
     const names = files.map((f, i) => f.name || `paste-${i + 1}.png`);
@@ -448,7 +468,7 @@
       <div class="field body-field">
         <div class="body-head">
           <span class="label">Description</span>
-          {#if !readOnly}
+          {#if !readOnly && !loading}
             <div class="body-actions">
               {#if mode === 'preview'}
                 <button type="button" class="linkish" data-testid="peek-edit-body" onclick={startEdit}>Edit</button>
@@ -474,7 +494,16 @@
             </div>
           {/if}
         </div>
-        {#if mode === 'edit' && !readOnly}
+        {#if loading}
+          <div class="body preview" data-testid="peek-body-loading" role="status">
+            {#if bodyFailed}
+              <span class="empty">Couldn't load the description.</span>
+              <button type="button" class="linkish" onclick={() => loadBody(ticketId)}>Retry</button>
+            {:else}
+              <span class="empty">Loading description…</span>
+            {/if}
+          </div>
+        {:else if mode === 'edit' && !readOnly}
           <textarea
             bind:this={textareaEl}
             bind:value={text}
@@ -510,7 +539,7 @@
           <div class="attachments" data-testid="peek-attachments">
             {#each t.attachments as a}
               <div class="att">
-                {#if !readOnly}
+                {#if !readOnly && !loading}
                   <button
                     type="button"
                     class="att-del"

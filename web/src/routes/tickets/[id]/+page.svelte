@@ -8,7 +8,7 @@
   import { renderMarkdown } from '$lib/markdown';
   import { labelColor } from '$lib/ui-helpers';
   import { relTime, bytes } from '$lib/format';
-  import { reconcileEditor } from '$lib/ticket-editor';
+  import { bodyPending, initialEditorState, reconcileEditor } from '$lib/ticket-editor';
   import {
     insertAtCursor,
     replaceAll,
@@ -32,8 +32,11 @@
 
   let mode = $state<'preview' | 'split' | 'edit'>('preview');
   let text = $state('');
+  // baseHash === '' means the buffer was never seeded from a loaded body, so
+  // `text` is not the ticket's body and must not be saved (see save()).
   let baseHash = $state('');
   let baseBody = $state(''); // the body at baseHash — dirtiness is measured against this
+  let bodyFailed = $state(false); // the lazy body fetch failed (shows Retry)
   let dirty = $derived(text !== baseBody);
   let conflict = $state<Ticket | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -111,14 +114,33 @@
     ro.observe(el);
     return () => ro.disconnect();
   });
-  // Load / rebase when the ticket identity or disk version changes.
+
+  // Snapshots omit bodies: fetch this ticket's on open, and again if a resync
+  // drops it because the file changed.
+  function loadBody(tid: string) {
+    bodyFailed = false;
+    workspace.ensureBody(tid).catch(() => {
+      if (tid === id) bodyFailed = true;
+    });
+  }
+  $effect(() => {
+    const t = ticket;
+    if (t && bodyPending(t)) loadBody(t.id);
+  });
+  const loading = $derived(!!ticket && bodyPending(ticket) && baseHash === '');
+
+  // Load / rebase when the ticket identity or disk version changes. While the
+  // body is still loading the buffer stays unseeded: `body ?? ''` here would turn
+  // "not loaded" into "empty" and the next autosave would wipe the ticket.
   $effect(() => {
     const t = ticket;
     if (!t) return;
     if (baseHash === '') {
-      text = t.body ?? '';
-      baseBody = t.body ?? '';
-      baseHash = t.hash;
+      const init = initialEditorState(t);
+      if (!init) return;
+      text = init.text;
+      baseBody = init.baseBody;
+      baseHash = init.baseHash;
       return;
     }
     if (t.hash !== baseHash) {
@@ -135,6 +157,7 @@
   $effect(() => {
     if (id !== lastId) {
       lastId = id;
+      text = ''; // don't carry the previous ticket's body into the next one
       baseHash = '';
       baseBody = '';
       conflict = null;
@@ -146,7 +169,8 @@
   const preview = $derived(renderMarkdown(mode === 'edit' ? '' : text));
 
   async function save(force = false) {
-    if (!ticket || readOnly) return;
+    // Unseeded buffer (body still loading): `text` isn't this ticket's body.
+    if (!ticket || readOnly || baseHash === '') return;
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     // A normal save uses baseHash — the version the editor content is based on —
     // NOT ticket.hash (which the SSE stream may have already advanced to the disk
@@ -157,7 +181,7 @@
     const opId = workspace.beginOp();
     try {
       const updated = await api.patchTicket(id, { body: text, opId }, ifMatch);
-      workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+      workspace.put(updated);
       baseHash = updated.hash;
       baseBody = updated.body ?? '';
       conflict = null;
@@ -195,7 +219,7 @@
   }
 
   async function startEdit(next: 'edit' | 'split' = 'edit') {
-    if (readOnly) return;
+    if (readOnly || baseHash === '') return;
     mode = next;
     await tick();
     fitTextarea();
@@ -278,7 +302,7 @@
     text = disk.body ?? '';
     baseBody = disk.body ?? '';
     baseHash = disk.hash;
-    workspace.tickets = { ...workspace.tickets, [disk.id]: disk };
+    workspace.put(disk);
     conflict = null;
   }
 
@@ -328,7 +352,7 @@
     if (index < 0) return;
     try {
       const updated = await api.setChecklistItem(id, index, target.checked, baseHash, workspace.beginOp());
-      workspace.tickets = { ...workspace.tickets, [updated.id]: updated };
+      workspace.put(updated);
       baseHash = updated.hash;
       baseBody = updated.body ?? '';
       text = updated.body ?? '';
@@ -340,7 +364,7 @@
   }
 
   async function uploadFiles(files: File[]) {
-    if (!files.length || readOnly || !id) return;
+    if (!files.length || readOnly || !id || baseHash === '') return;
     // Ensure we have an editor surface so placeholders land in the body.
     const fromPreview = mode === 'preview';
     if (fromPreview) await startEdit('edit');
@@ -481,6 +505,16 @@
       </div>
     {/if}
 
+    {#if loading}
+      <div class="body-loading" data-testid="body-loading" role="status">
+        {#if bodyFailed}
+          Couldn't load the description.
+          <button type="button" onclick={() => loadBody(id)}>Retry</button>
+        {:else}
+          Loading description…
+        {/if}
+      </div>
+    {:else}
     <div class="editor-shell" bind:this={editorShellEl}>
       <div class="editor-head">
         {#if !readOnly}
@@ -550,12 +584,13 @@
         {/if}
       </div>
     </div>
+    {/if}
 
     {#if ticket.attachments.length}
       <div class="attachments" data-testid="attachments">
         {#each ticket.attachments as a}
           <div class="att">
-            {#if !readOnly}
+            {#if !readOnly && !loading}
               <button
                 type="button"
                 class="att-del"
@@ -668,6 +703,8 @@
   .labels input { width: 80px; background: none; border: 1px dashed var(--color-border); border-radius: 6px; padding: 2px 6px; font-size: 11px; }
   .updated { margin-left: auto; color: var(--color-dim); font-size: 11px; }
   .conflict { background: color-mix(in srgb, var(--color-warn) 12%, var(--color-surface)); border: 1px solid var(--color-warn); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .body-loading { display: flex; align-items: center; gap: 8px; min-height: 120px; padding: 12px 14px; border: 1px dashed var(--color-border); border-radius: 8px; color: var(--color-dim); font-size: 13px; }
+  .body-loading button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
   .conflict button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
   .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 28px; }
   .edit-hint { color: var(--color-dim); font-size: 12px; }

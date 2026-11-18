@@ -15,11 +15,11 @@ import (
 	"github.com/underworld14/pine/internal/view"
 )
 
-func newTestServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	pine := filepath.Join(t.TempDir(), ".pine")
+func newTestStore(tb testing.TB) *store.Store {
+	tb.Helper()
+	pine := filepath.Join(tb.TempDir(), ".pine")
 	if err := os.MkdirAll(filepath.Join(pine, "tickets"), 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	cfg := config.Default("test")
 	cfg.IDStyle = "sequential"
@@ -29,9 +29,14 @@ func newTestServer(t *testing.T) *httptest.Server {
 	os.WriteFile(filepath.Join(pine, "board.json"), bB, 0o644)
 	st, err := store.Open(pine)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	ts := httptest.NewServer(New(st, "test").Handler())
+	return st
+}
+
+func newTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(New(newTestStore(t), "test").Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

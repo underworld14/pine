@@ -183,3 +183,102 @@ describe('TicketPeekSheet', () => {
     expect(delSpy).toHaveBeenCalledWith('BUG-1', 'shot.png', 'op1');
   });
 });
+
+// Snapshots omit bodies, so a ticket can open before its body is loaded. The
+// editor must wait: `body ?? ''` would turn "not loaded" into "empty" and an
+// autosave / close-flush would then wipe the ticket's real description.
+describe('TicketPeekSheet with a lazily-loaded body', () => {
+  function pending(extra: Partial<Ticket> = {}): Ticket {
+    const t = mk(extra);
+    delete t.body;
+    return t;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    workspace.tickets = {};
+  });
+
+  it('requests the body, shows a loading state, and offers no edit controls', async () => {
+    workspace.tickets = { 'BUG-1': pending() };
+    workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+    const ensure = vi.spyOn(workspace, 'ensureBody').mockReturnValue(new Promise(() => {}));
+    render(TicketPeekSheet, { props: { ticketId: 'BUG-1', onClose: vi.fn() } });
+
+    expect(ensure).toHaveBeenCalledWith('BUG-1');
+    expect(screen.getByTestId('peek-body-loading')).toBeTruthy();
+    expect(screen.queryByTestId('peek-body-preview')).toBeNull();
+    expect(screen.queryByTestId('peek-edit-body')).toBeNull();
+    expect(screen.queryByTestId('peek-body-edit')).toBeNull();
+  });
+
+  it('never saves an unloaded body (⌘S, Escape, Close all stay silent)', async () => {
+    workspace.tickets = { 'BUG-1': pending() };
+    workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+    vi.spyOn(workspace, 'ensureBody').mockReturnValue(new Promise(() => {}));
+    const patch = vi.spyOn(api, 'patchTicket');
+    const onClose = vi.fn();
+    const { unmount } = render(TicketPeekSheet, { props: { ticketId: 'BUG-1', onClose } });
+
+    const sheet = screen.getByTestId('ticket-peek-sheet');
+    await fireEvent.keyDown(sheet, { key: 's', metaKey: true });
+    await fireEvent.dblClick(screen.getByTestId('peek-body-loading'));
+    await fireEvent.click(screen.getByTestId('peek-close'));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    unmount();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('seeds the editor from the real body once it arrives, and saves that — not ""', async () => {
+    workspace.tickets = { 'BUG-1': pending() };
+    workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+    vi.spyOn(workspace, 'ensureBody').mockReturnValue(new Promise(() => {}));
+    const patch = vi.spyOn(api, 'patchTicket').mockResolvedValue(mk({ body: 'Fixed', hash: 'h2' }));
+    vi.spyOn(workspace, 'beginOp').mockReturnValue('op1');
+    render(TicketPeekSheet, { props: { ticketId: 'BUG-1', onClose: vi.fn() } });
+    expect(screen.getByTestId('peek-body-loading')).toBeTruthy();
+
+    workspace.tickets = { 'BUG-1': mk({ body: 'Real description' }) };
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('peek-body-preview').textContent).toContain('Real description')
+    );
+
+    await fireEvent.click(screen.getByTestId('peek-edit-body'));
+    const ta = screen.getByTestId('peek-body-edit') as HTMLTextAreaElement;
+    expect(ta.value).toBe('Real description');
+    await fireEvent.input(ta, { target: { value: 'Fixed' } });
+    await fireEvent.keyDown(screen.getByTestId('ticket-peek-sheet'), { key: 's', metaKey: true });
+    expect(patch).toHaveBeenCalledWith('BUG-1', { body: 'Fixed', opId: 'op1' }, 'h');
+  });
+
+  it('does not treat a body dropped by a resync as empty while editing', async () => {
+    workspace.tickets = { 'BUG-1': mk({ body: 'Mine' }) };
+    workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+    const ensure = vi.spyOn(workspace, 'ensureBody').mockReturnValue(new Promise(() => {}));
+    render(TicketPeekSheet, { props: { ticketId: 'BUG-1', onClose: vi.fn() } });
+    await fireEvent.click(screen.getByTestId('peek-edit-body'));
+    await fireEvent.input(screen.getByTestId('peek-body-edit'), { target: { value: 'Mine, edited' } });
+
+    // A reconnect resync lands: file changed, body omitted.
+    workspace.tickets = { 'BUG-1': pending({ hash: 'h2' }) };
+    await vi.waitFor(() => expect(ensure).toHaveBeenCalledWith('BUG-1'));
+
+    // The draft stays untouched (no flash of loading, nothing adopted as '').
+    expect((screen.getByTestId('peek-body-edit') as HTMLTextAreaElement).value).toBe('Mine, edited');
+    expect(screen.queryByTestId('peek-body-loading')).toBeNull();
+  });
+
+  it('offers a retry when the body fails to load', async () => {
+    workspace.tickets = { 'BUG-1': pending() };
+    workspace.board = { columns: [{ status: 'todo', title: 'Todo' }], unmapped: [] };
+    const ensure = vi.spyOn(workspace, 'ensureBody').mockRejectedValueOnce(new Error('boom'));
+    render(TicketPeekSheet, { props: { ticketId: 'BUG-1', onClose: vi.fn() } });
+    const loading = screen.getByTestId('peek-body-loading');
+    await vi.waitFor(() => expect(loading.textContent).toContain("Couldn't load"));
+
+    ensure.mockReturnValue(new Promise(() => {}));
+    await fireEvent.click(loading.querySelector('button')!);
+    expect(ensure).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(loading.textContent).toContain('Loading'));
+  });
+});

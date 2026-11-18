@@ -8,6 +8,10 @@ import { sortByEffective } from './board-order';
 
 type Conn = 'connecting' | 'live' | 'down';
 
+// If the event stream hasn't opened (or failed) this long after start, load the
+// snapshot directly so a stuck stream can't leave the board on its skeleton.
+const FALLBACK_LOAD_MS = 3000;
+
 export interface ColumnView {
   status: string;
   title: string;
@@ -16,6 +20,13 @@ export interface ColumnView {
 
 function uuid(): string {
   return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+}
+
+// fullTicket normalises a ticket from a full-ticket source (PATCH/SSE/GET): the
+// server omits an empty body, which must read as "" there, not "not loaded yet".
+// Off-branch tickets are left alone (they never lazy-load).
+function fullTicket(t: Ticket): Ticket {
+  return typeof t.body === 'string' || t.readOnly ? t : { ...t, body: '' };
 }
 
 // readOnlyMessage explains why an off-branch ticket cannot be edited from here.
@@ -48,6 +59,10 @@ class WorkspaceStore {
 
   private recentOps = new Set<string>();
   private sse: PineEventSource | null = null;
+  private inflight: Promise<void> | null = null;
+  private bodyFetches = new Map<string, Promise<void>>();
+  private epoch = 0; // bumped on repo switch to drop in-flight body fetches
+  private loadTimer: ReturnType<typeof setTimeout> | null = null;
 
   list = $derived(Object.values(this.tickets));
   isMultiRepo = $derived(this.repos.length > 1);
@@ -56,22 +71,25 @@ class WorkspaceStore {
     const b = this.board;
     if (!b) return [];
     const first = b.columns[0]?.status;
+    // One pass over the tickets instead of a filter per column. A ticket with no
+    // status (e.g. an agent omitted the frontmatter key) falls into the first
+    // column rather than disappearing from the board.
+    const groups = new Map<string, Ticket[]>();
+    for (const t of this.list) {
+      const key = t.status === '' && first !== undefined ? first : t.status;
+      const g = groups.get(key);
+      if (g) g.push(t);
+      else groups.set(key, [t]);
+    }
     const cols: ColumnView[] = b.columns.map((c) => ({
       status: c.status,
       title: c.title,
-      // A ticket with no status (e.g. an agent omitted the frontmatter key) falls
-      // into the first column rather than disappearing from the board.
-      tickets: this.sorted(this.list.filter((t) => t.status === c.status || (t.status === '' && c.status === first)))
+      tickets: this.sorted(groups.get(c.status) ?? [])
     }));
     // Unmapped statuses render as an "Other" tray on the far right.
     const mapped = new Set(b.columns.map((c) => c.status));
-    const others = this.list.filter((t) => t.status && !mapped.has(t.status));
-    if (others.length) {
-      const byStatus = new Map<string, Ticket[]>();
-      for (const t of others) {
-        (byStatus.get(t.status) ?? byStatus.set(t.status, []).get(t.status)!).push(t);
-      }
-      for (const [status, ts] of byStatus) {
+    for (const [status, ts] of groups) {
+      if (status && !mapped.has(status)) {
         cols.push({ status, title: `Other: ${status}`, tickets: this.sorted(ts) });
       }
     }
@@ -94,14 +112,35 @@ class WorkspaceStore {
     return sortByEffective(ts);
   }
 
-  async hydrate() {
+  // Overlapping calls share one in-flight request (the SSE onopen resync and the
+  // fallback paths can race on a cold load).
+  hydrate(): Promise<void> {
+    if (!this.inflight) {
+      const p = this.load().finally(() => {
+        if (this.inflight === p) this.inflight = null;
+      });
+      this.inflight = p;
+    }
+    return this.inflight;
+  }
+
+  private async load() {
     try {
       const [snap, repos] = await Promise.all([
         api.snapshot(),
         api.repos().catch(() => null)
       ]);
+      const prev = this.tickets;
       const map: Record<string, Ticket> = {};
-      for (const t of snap.tickets) map[t.id] = t;
+      for (const t of snap.tickets) {
+        // Snapshots omit bodies. Keep one we already loaded while the file is
+        // unchanged; a changed hash makes it stale, so it is dropped and re-fetched.
+        const old = prev[t.id];
+        map[t.id] =
+          typeof t.body !== 'string' && typeof old?.body === 'string' && old.hash === t.hash
+            ? { ...t, body: old.body }
+            : t;
+      }
       this.tickets = map;
       this.board = snap.board;
       this.config = snap.config;
@@ -121,17 +160,57 @@ class WorkspaceStore {
     }
   }
 
+  // ensureBody lazy-loads a ticket's markdown body (the snapshot omits it). It is
+  // a no-op for unknown or off-branch tickets (those always ship their body — the
+  // detail endpoint can't serve them) and when the body is already loaded.
+  // Concurrent calls for the same id share one request.
+  ensureBody(id: string): Promise<void> {
+    const t = this.tickets[id];
+    if (!t || t.readOnly || typeof t.body === 'string') return Promise.resolve();
+    let p = this.bodyFetches.get(id);
+    if (!p) {
+      p = this.fetchBody(id).finally(() => {
+        if (this.bodyFetches.get(id) === p) this.bodyFetches.delete(id);
+      });
+      this.bodyFetches.set(id, p);
+    }
+    return p;
+  }
+
+  private async fetchBody(id: string) {
+    const epoch = this.epoch;
+    const fetched = fullTicket(await api.getTicket(id));
+    const cur = this.tickets[id];
+    // Never clobber a newer SSE/PATCH copy (it already carries a body) with this
+    // possibly older fetch; a body-less copy has nothing to lose. A repo switch
+    // in between makes the fetch foreign (ids repeat across repos).
+    if (epoch !== this.epoch || !cur || typeof cur.body === 'string') return;
+    this.tickets = {
+      ...this.tickets,
+      // Same version: just attach the body. Otherwise adopt the whole fetched
+      // ticket so its body and hash stay consistent (a stale hash only costs a 409).
+      [id]: cur.hash === fetched.hash ? { ...cur, body: fetched.body } : fetched
+    };
+  }
+
   async switchRepo(alias: string) {
     if (alias === this.activeRepo) return;
     await api.activateRepo(alias);
     this.activeRepo = alias;
+    this.epoch++;
+    this.bodyFetches.clear();
     // Promote the cached git snapshot (if its poller has reported one) so the
     // header updates instantly; hydrate() refreshes it from the snapshot next.
     const cached = this.gitByRepo[alias];
     if (cached) this.git = cached;
+    // An in-flight load predates the switch and holds the old repo's data.
+    await this.inflight?.catch(() => {});
     await this.hydrate();
   }
 
+  // The SSE open handler does the initial load (and every resync after a
+  // reconnect), so a cold start issues a single snapshot. Two fallbacks keep the
+  // board loading if the stream never opens: a failed attempt, or a long silence.
   startLive() {
     if (this.sse) return;
     this.sse = new PineEventSource(
@@ -141,12 +220,20 @@ class WorkspaceStore {
         // Resync on every (re)connect; drafts live elsewhere so nothing is lost.
         this.hydrate().catch(() => {});
       },
-      () => { this.connection = 'down'; }
+      () => {
+        this.connection = 'down';
+        if (!this.hydrated) this.hydrate().catch(() => {});
+      }
     );
     this.sse.connect();
+    this.loadTimer = setTimeout(() => {
+      if (!this.hydrated) this.hydrate().catch(() => {});
+    }, FALLBACK_LOAD_MS);
   }
 
   stopLive() {
+    if (this.loadTimer) clearTimeout(this.loadTimer);
+    this.loadTimer = null;
     this.sse?.close();
     this.sse = null;
   }
@@ -181,7 +268,7 @@ class WorkspaceStore {
       case 'ticket.created':
       case 'ticket.updated':
         if (ev.ticket) {
-          this.tickets = { ...this.tickets, [ev.ticket.id]: ev.ticket };
+          this.put(ev.ticket);
           if (external) this.flash(ev.ticket.id);
         }
         break;
@@ -232,8 +319,7 @@ class WorkspaceStore {
     const opId = this.trackOp();
     this.tickets = { ...this.tickets, [id]: { ...before, status: toStatus } };
     try {
-      const updated = await api.patchTicket(id, { status: toStatus, opId }, before.hash);
-      this.tickets = { ...this.tickets, [id]: updated };
+      this.put(await api.patchTicket(id, { status: toStatus, opId }, before.hash));
     } catch (e) {
       // Roll back only if no external update landed while the request was in
       // flight (our optimistic copy kept `before.hash`; an external change would
@@ -259,8 +345,7 @@ class WorkspaceStore {
     const opId = this.trackOp();
     this.tickets = { ...this.tickets, [id]: { ...before, ...patch } as Ticket };
     try {
-      const updated = await api.patchTicket(id, { ...patch, opId }, before.hash);
-      this.tickets = { ...this.tickets, [id]: updated };
+      this.put(await api.patchTicket(id, { ...patch, opId }, before.hash));
     } catch (e) {
       const cur = this.tickets[id];
       if (cur && cur.hash === before.hash) {
@@ -275,14 +360,14 @@ class WorkspaceStore {
     if (cur?.readOnly) throw new Error(readOnlyMessage(cur));
     const opId = this.trackOp();
     const updated = await api.patchTicket(id, { ...patch, opId }, cur?.hash);
-    this.tickets = { ...this.tickets, [id]: updated };
+    this.put(updated);
     return updated;
   }
 
   async create(input: Record<string, unknown>): Promise<Ticket> {
     const opId = this.trackOp();
     const t = await api.createTicket({ ...input, opId });
-    this.tickets = { ...this.tickets, [t.id]: t };
+    this.put(t);
     return t;
   }
 
@@ -293,6 +378,11 @@ class WorkspaceStore {
     await api.deleteTicket(id, opId);
     const { [id]: _, ...rest } = this.tickets;
     this.tickets = rest;
+  }
+
+  // put stores a full ticket (PATCH/SSE/GET response) in the map.
+  put(t: Ticket) {
+    this.tickets = { ...this.tickets, [t.id]: fullTicket(t) };
   }
 
   get(id: string): Ticket | undefined {
