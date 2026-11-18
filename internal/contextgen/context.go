@@ -209,7 +209,7 @@ func writeConventions(b *strings.Builder, s *store.Store, memBlock string) {
 	b.WriteString("- `parent` points at an EPIC ticket for grouping.\n")
 	b.WriteString("- `skills` names agent skills the executing agent must load before starting the ticket; manage them with `pine update <ID> --add-skill/--rm-skill`.\n")
 	b.WriteString("- `links` lists typed graph refs (ticket IDs, `LRN-*`, `memory/<topic>`, `MEMORY`); backlinks are computed.\n")
-	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done.\n")
+	b.WriteString("- Use `pine ready` to see actionable work, `pine close <ID>` to mark a ticket done (`--evidence` attaches proof; `--commit <rev>` records exact commits).\n")
 	b.WriteString("- Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.\n")
 	b.WriteString("- Capture durable insights with `pine learn \"...\"` into `.pine/MEMORY.md` or `.pine/memory/<topic>.md` (ticket one-shots: `--scope ticket`).\n")
 	if cfg.Context.GlobalMemory {

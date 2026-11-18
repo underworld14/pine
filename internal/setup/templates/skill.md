@@ -49,9 +49,19 @@ auditable:
    refuses the close — fix it or pass `--force` to close with the failure
    recorded), then marks the ticket `done` and appends a `## Verification`
    section (command, exit status, output) plus a `## Work Evidence` section
-   (commits that reference/touch the ticket + a `git diff --stat` from the
-   commit at its creation time to the working tree) — a durable record of what
-   changed and why, and proof it is actually wired in.
+   (commits that reference/touch the ticket + a `git diff --stat`, capped at
+   50 files, from the commit at its creation time to the working tree) — a
+   durable record of what changed and why, and proof it is actually wired in.
+5. **Work already committed?** File and close it with exact evidence instead of
+   a creation-anchored diff — `--commit <rev>` (repeatable) records those
+   commits as the ticket's `## Work Evidence`:
+   ```text
+   pine create --type bug --title "<what was fixed>" --status testing --commit HEAD
+   pine close <ID> --evidence                     # keeps evidence recorded this way
+   pine close <ID> --evidence --commit <rev>      # (re)record from specific commits
+   ```
+   Executors that may not touch `.pine/` can leave this to the orchestrator:
+   one `pine create … --commit <sha>` per part, left in `testing` for a reviewer.
 
 ## Essential commands
 
@@ -63,11 +73,14 @@ pine prompt <ID> --template name # render .pine/prompts/<name>.md instead
 pine context [--full]            # compact briefing by default; --full = exhaustive
 pine list [--all] [--json]       # open tickets by default; --all includes done
 pine log <ID> [--json]           # commits that reference or touch this ticket
+pine changed [--since <ref>] [--json]   # .pine/ files changed since a ref (diff-able snapshot for gates)
+pine release-notes --since <ref> [--group-by type|label] [--json]   # Markdown notes from tickets closed since a ref
 pine create / update / close     # CLI mutations
 pine update <ID> --body-file f   # replace the markdown body (or '-' for stdin)
 pine update <ID> --add-skill x / --rm-skill x   # manage the ticket's required skills
 pine dep add <ID> <DEP>… / rm    # rewire dependencies after creation (refuses cycles)
 pine close <ID> --evidence       # run verify:, attach evidence, mark done
+pine create … --commit <rev>     # record exact commits as the ticket's work evidence
 pine learn "<insight>"           # capture a durable cross-agent learning
 pine learn list / search / show  # inspect learnings
 pine learn supersede / rm        # replace or delete a learning
@@ -90,6 +103,7 @@ pine doctor [--fix]              # health check; --fix repairs mechanical issues
   ```
   `pine context` uses these paths to pick tickets relevant to your current changes.
 - Attachments live in `.pine/attachments/<ID>/` and are referenced relatively from the ticket body.
+- **Committing ticket changes:** Pine never runs `git commit`; ticket files are plain files. Stage `.pine/tickets/<ID>.md` in the code commit it describes. For status-only moves (hand-off, review verdict) write the verdict as a section in the ticket body and fold it into the next code commit, or make one `pine:` commit per session — not one per move. The record survives squashing because it lives in the ticket. `pine release-notes` ignores commits that only touch `.pine/`.
 - **Do not** use markdown TODO lists for issue tracking — use Pine tickets.
 - Prefer editing ticket files over ad-hoc notes or separate task files.
 

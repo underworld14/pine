@@ -122,6 +122,9 @@ pine close FEAT-001            # → BUG-001 becomes ready
 pine show EPIC-001             # epic with child progress (1/2 done)
 pine update BUG-001 --status doing
 pine log BUG-001               # commits that mention or touch this ticket
+pine create --type bug --title "Fix login" --status testing --commit HEAD   # file committed work with exact evidence
+pine release-notes --since v1.2.0   # Markdown notes from tickets closed since a tag
+pine changed --json            # what changed under .pine/ (snapshot it in a gate)
 pine doctor --fix              # health check; auto-repair the mechanical issues
 pine import github             # pull open GitHub issues in as tickets (via gh)
 pine import beads              # pull Beads issues in as tickets (via bd export)
@@ -432,6 +435,44 @@ the git config is local, so each teammate runs `pine setup merge` after cloning
 **Commit history.** `pine log <ID>` lists the commits that mention a ticket or
 touched its file — a quick audit trail linking tickets to the code that changed
 for them.
+
+**Committing ticket changes.** Pine never runs `git commit`; tickets are plain
+files, so how they enter history is up to you. Stage `.pine/tickets/<ID>.md` in
+the code commit it describes. For status-only moves (a hand-off, a review
+verdict) write the verdict as a section in the ticket body and fold it into the
+next code commit, or make one `pine:` commit per session — a commit per status
+move buries the real history.
+The review record survives squashing because it lives in the ticket, so note
+the review base SHA in the hand-off section instead of deriving it from
+per-status commits.
+
+**Work evidence.** `pine close <ID> --evidence` appends the commits that cite the
+ticket and a `git diff --stat` (capped at 50 files) from the ticket's creation to
+the working tree, after running its `verify:` command. For work that is already
+committed, `pine create … --commit <rev>` (repeatable) records exactly those
+commits instead; `pine close --evidence` keeps such a section, and
+`pine close --evidence --commit <rev>` re-records it.
+
+**Release notes.** `pine release-notes --since <ref>` lists the tickets that
+became done since a tag, branch, or commit — grouped by type (or
+`--group-by label`), highest priority first, each linking the commits that cite
+it. Commits that only touch `.pine/` (hand-offs, review verdicts) and merge
+commits are skipped, so bookkeeping never reaches the notes. The output is
+Markdown, ready for `gh release create v1.3.0 --notes-file -`; `--json` gives the
+same data for scripts. It needs tickets tracked in git (`sync.tickets`).
+
+**Gating agent edits.** A gate that must not fail on `.pine/` changes that
+existed before the work started (an owner's untracked ticket, say) can compare
+snapshots of `pine changed --json` instead of rejecting every `.pine/` change.
+The output is sorted by path, has no timestamps, and carries each file's hash and
+each ticket's status before and after:
+
+```sh
+pine changed --json > "$SNAP/pine.json"                 # before delegating
+pine changed --json | diff -q - "$SNAP/pine.json"       # after: fails only on new edits
+```
+
+`--since <ref>` compares against any commit, tag, or branch instead of `HEAD`.
 
 **Importing.** Already have a GitHub backlog? `pine import github` pulls open
 issues in as tickets via your existing `gh` CLI auth (idempotent — re-running
