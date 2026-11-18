@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path"
@@ -62,10 +63,7 @@ func workEvidence(s *store.Store, id string) string {
 	hasStat := strings.TrimSpace(stat) != ""
 
 	if hasCommits {
-		b.WriteString(fmt.Sprintf("- Commits (%d):\n", len(commits)))
-		for _, c := range commits {
-			b.WriteString(fmt.Sprintf("  - `%s` — %s\n", c.Hash, c.Subject))
-		}
+		writeCommitList(&b, commits)
 	}
 	if hasStat {
 		b.WriteString("- Files changed (base → working tree):\n\n```\n")
@@ -76,6 +74,73 @@ func workEvidence(s *store.Store, id string) string {
 		b.WriteString("- _(no file changes detected since ticket creation)_\n")
 	}
 	return b.String()
+}
+
+// writeCommitList renders the "- Commits (n):" bullets used by both evidence
+// modes, so recorded and auto-derived evidence read the same.
+func writeCommitList(b *strings.Builder, commits []gitx.Commit) {
+	fmt.Fprintf(b, "- Commits (%d):\n", len(commits))
+	for _, c := range commits {
+		fmt.Fprintf(b, "  - `%s` — %s\n", c.Hash, c.Subject)
+	}
+}
+
+// recordedEvidenceMarker opens the line of a Work Evidence section written from
+// explicit commits (pine create/close --commit). pine close --evidence leaves
+// such a section alone: re-deriving it from the ticket's creation time would
+// replace exact evidence with a diff of every unrelated change since.
+const recordedEvidenceMarker = "Recorded from commits by"
+
+// recordedCommits are commits the user named with --commit, resolved up front
+// so a bad rev fails before any ticket is created or closed.
+type recordedCommits struct {
+	client  gitx.Client
+	commits []gitx.Commit
+	shas    []string
+}
+
+func resolveCommits(s *store.Store, revs []string) (*recordedCommits, error) {
+	client := gitx.New(filepath.Dir(s.Root()))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if !client.IsRepo(ctx) {
+		return nil, errors.New("--commit needs a git repository")
+	}
+	r := &recordedCommits{client: client}
+	for _, rev := range revs {
+		sha, c, ok := client.ResolveCommit(ctx, rev)
+		if !ok {
+			return nil, fmt.Errorf("unknown commit %q", rev)
+		}
+		r.shas = append(r.shas, sha)
+		r.commits = append(r.commits, c)
+	}
+	return r, nil
+}
+
+// evidence renders the "## Work Evidence" section for exactly these commits:
+// the commit bullets plus a capped per-commit file stat. by names the command
+// that recorded it.
+func (r *recordedCommits) evidence(by string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var b strings.Builder
+	b.WriteString("## Work Evidence\n\n")
+	fmt.Fprintf(&b, "%s `%s` on %s.\n\n", recordedEvidenceMarker, by, time.Now().UTC().Format("2006-01-02"))
+	writeCommitList(&b, r.commits)
+	if stat := r.client.CommitStat(ctx, r.shas); strings.TrimSpace(stat) != "" {
+		b.WriteString("- Files changed:\n\n```\n")
+		b.WriteString(stat)
+		b.WriteString("\n```\n")
+	}
+	return b.String()
+}
+
+// hasRecordedEvidence reports whether the body's Work Evidence section was
+// recorded from explicit commits (see recordedEvidenceMarker).
+func hasRecordedEvidence(body string) bool {
+	start, end, ok := sectionBounds(body, "Work Evidence")
+	return ok && strings.Contains(body[start:end], recordedEvidenceMarker)
 }
 
 func shortSHA(sha string) string {
@@ -164,17 +229,26 @@ func tailLines(s string, max int) string {
 	return fmt.Sprintf("… (%d earlier lines trimmed)\n%s", len(lines)-max, strings.Join(lines[len(lines)-max:], "\n"))
 }
 
+// sectionBounds locates the "## <heading>" section: start is the index of its
+// heading and end the index of the next "## " section (or the end of the body).
+func sectionBounds(body, heading string) (start, end int, ok bool) {
+	start = strings.Index(body, "## "+heading)
+	if start < 0 {
+		return 0, 0, false
+	}
+	end = len(body)
+	if nl := strings.Index(body[start+1:], "\n## "); nl >= 0 {
+		end = start + 1 + nl
+	}
+	return start, end, true
+}
+
 // appendSection replaces any existing "## <heading>" section in the body with
 // content, or appends it at the end. Everything outside the section is
 // preserved, so a ticket's original notes stay intact across re-runs and the
 // Work Evidence and Verification sections can coexist in a stable order.
 func appendSection(body, heading, content string) string {
-	marker := "## " + heading
-	if idx := strings.Index(body, marker); idx >= 0 {
-		end := len(body)
-		if nl := strings.Index(body[idx+1:], "\n## "); nl >= 0 {
-			end = idx + 1 + nl
-		}
+	if idx, end, ok := sectionBounds(body, heading); ok {
 		out := strings.TrimRight(body[:idx], "\n")
 		if out != "" {
 			out += "\n\n"

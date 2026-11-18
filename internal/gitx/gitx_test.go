@@ -314,7 +314,6 @@ func TestChangesAndCommitsEdgeCases(t *testing.T) {
 	}
 }
 
-
 func TestLogWithPathspecDefaultLimit(t *testing.T) {
 	gitAvailable(t)
 	dir := t.TempDir()
@@ -405,5 +404,256 @@ func TestDiffStatAndCommitBefore(t *testing.T) {
 	// DiffStat on a non-repo is empty.
 	if got := New(t.TempDir()).DiffStat(ctx, ""); got != "" {
 		t.Errorf("DiffStat on non-repo = %q, want empty", got)
+	}
+}
+
+func revParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", rev).Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestResolveCommit(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, "a.txt", "1\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "first subject")
+	run(t, dir, "tag", "v1")
+	writeFile(t, dir, "a.txt", "2\n")
+	run(t, dir, "commit", "-q", "-am", "second subject")
+
+	c := New(dir)
+	ctx := context.Background()
+	want := revParse(t, dir, "HEAD~1")
+
+	for _, rev := range []string{"v1", "HEAD~1", want} {
+		sha, cm, ok := c.ResolveCommit(ctx, rev)
+		if !ok || sha != want || cm.Subject != "first subject" || cm.Author != "Test" || cm.Hash != shortHash(want) {
+			t.Errorf("ResolveCommit(%q) = %q %+v %v", rev, sha, cm, ok)
+		}
+	}
+	for _, bad := range []string{"", "nope", "--output=/tmp/x", "-1", "v1\nHEAD"} {
+		if _, _, ok := c.ResolveCommit(ctx, bad); ok {
+			t.Errorf("ResolveCommit(%q) should fail", bad)
+		}
+	}
+	if _, _, ok := New(t.TempDir()).ResolveCommit(ctx, "HEAD"); ok {
+		t.Error("ResolveCommit on a non-repo should fail")
+	}
+}
+
+func changeMap(cs []Change) map[string]string {
+	m := map[string]string{}
+	for _, c := range cs {
+		m[c.Path] = c.Code
+	}
+	return m
+}
+
+func TestChangedFiles(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, ".gitignore", ".pine/attachments/\n")
+	writeFile(t, dir, ".pine/tickets/A.md", "a\n")
+	writeFile(t, dir, ".pine/tickets/B.md", "b\n")
+	writeFile(t, dir, ".pine/tickets/E.md", "e\n")
+	writeFile(t, dir, "src/x.go", "package src\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "base")
+	base := revParse(t, dir, "HEAD")
+
+	// Committed after base.
+	writeFile(t, dir, ".pine/tickets/E.md", "e2\n")
+	run(t, dir, "commit", "-q", "-am", "edit E")
+	// Uncommitted: modify A, delete B, stage D, leave C untracked, ignore an attachment.
+	writeFile(t, dir, ".pine/tickets/A.md", "a2\n")
+	run(t, dir, "rm", "-q", ".pine/tickets/B.md")
+	writeFile(t, dir, ".pine/tickets/D.md", "d\n")
+	run(t, dir, "add", ".pine/tickets/D.md")
+	writeFile(t, dir, ".pine/tickets/C.md", "c\n")
+	writeFile(t, dir, ".pine/attachments/z.bin", "z\n")
+	writeFile(t, dir, "src/x.go", "package src // changed\n")
+
+	c := New(dir)
+	ctx := context.Background()
+	got := changeMap(c.ChangedFiles(ctx, base, ".pine"))
+	want := map[string]string{
+		".pine/tickets/A.md": "M",
+		".pine/tickets/B.md": "D",
+		".pine/tickets/C.md": "A",
+		".pine/tickets/D.md": "A",
+		".pine/tickets/E.md": "M",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ChangedFiles = %v, want %v", got, want)
+	}
+	for p, code := range want {
+		if got[p] != code {
+			t.Errorf("%s = %q, want %q (all: %v)", p, got[p], code, got)
+		}
+	}
+	// Results are sorted by path so callers get deterministic output.
+	cs := c.ChangedFiles(ctx, base, ".pine")
+	for i := 1; i < len(cs); i++ {
+		if cs[i-1].Path > cs[i].Path {
+			t.Fatalf("not sorted: %v", cs)
+		}
+	}
+	// Against HEAD only the uncommitted changes remain (E was committed).
+	if head := changeMap(c.ChangedFiles(ctx, "HEAD", ".pine")); len(head) != 4 || head[".pine/tickets/E.md"] != "" {
+		t.Errorf("ChangedFiles(HEAD) = %v", head)
+	}
+	if got := c.ChangedFiles(ctx, "no-such-rev", ".pine"); len(got) != 0 {
+		t.Errorf("bad rev should yield nothing, got %v", got)
+	}
+	if got := New(t.TempDir()).ChangedFiles(ctx, "HEAD", ".pine"); len(got) != 0 {
+		t.Errorf("non-repo should yield nothing, got %v", got)
+	}
+}
+
+func TestChangedFilesFromSubdirIsRelative(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, "app/.pine/tickets/A.md", "a\n")
+	writeFile(t, dir, "other/.pine/tickets/Z.md", "z\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app/.pine/tickets/A.md", "a2\n")
+	writeFile(t, dir, "other/.pine/tickets/Z.md", "z2\n")
+
+	got := changeMap(New(filepath.Join(dir, "app")).ChangedFiles(context.Background(), "HEAD", ".pine"))
+	if len(got) != 1 || got[".pine/tickets/A.md"] != "M" {
+		t.Fatalf("want only app-relative .pine/tickets/A.md, got %v", got)
+	}
+}
+
+func TestRangeLog(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, "a.txt", "0\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "base")
+	run(t, dir, "tag", "v1")
+
+	writeFile(t, dir, "src/fix.go", "package src\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "fix thing (FEAT-001)", "-m", "body mentions BUG-002")
+	writeFile(t, dir, ".pine/tickets/FEAT-001.md", "t\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "pine: hand off FEAT-001 for review")
+	writeFile(t, dir, "src/more.go", "package src\n")
+	writeFile(t, dir, ".pine/tickets/FEAT-001.md", "t2\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "code plus ticket FEAT-001")
+
+	c := New(dir)
+	ctx := context.Background()
+
+	// With .pine excluded, the pine-only commit disappears.
+	got := c.RangeLog(ctx, "v1", "HEAD", ".pine")
+	if len(got) != 2 {
+		t.Fatalf("RangeLog = %+v, want 2 code commits", got)
+	}
+	if got[0].Subject != "code plus ticket FEAT-001" || got[1].Subject != "fix thing (FEAT-001)" {
+		t.Errorf("order/subjects = %q, %q", got[0].Subject, got[1].Subject)
+	}
+	if !strings.Contains(got[1].Message, "body mentions BUG-002") || !strings.Contains(got[1].Message, "fix thing (FEAT-001)") {
+		t.Errorf("Message should hold subject and body, got %q", got[1].Message)
+	}
+	if got[1].Hash == "" || got[1].Author != "Test" || got[1].When.IsZero() {
+		t.Errorf("commit fields not populated: %+v", got[1])
+	}
+	// Without an exclusion every commit in the range is returned.
+	if all := c.RangeLog(ctx, "v1", "HEAD", ""); len(all) != 3 {
+		t.Errorf("RangeLog without exclude = %d commits, want 3", len(all))
+	}
+	if got := c.RangeLog(ctx, "no-such", "HEAD", ".pine"); len(got) != 0 {
+		t.Errorf("bad range should yield nothing, got %+v", got)
+	}
+	if got := New(t.TempDir()).RangeLog(ctx, "a", "b", ""); len(got) != 0 {
+		t.Errorf("non-repo should yield nothing, got %+v", got)
+	}
+}
+
+func TestCommitStat(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, "a.txt", "1\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "one")
+	writeFile(t, dir, "b.txt", "2\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "two")
+
+	c := New(dir)
+	ctx := context.Background()
+	got := c.CommitStat(ctx, []string{revParse(t, dir, "HEAD~1"), revParse(t, dir, "HEAD")})
+	for _, want := range []string{"one", "a.txt", "two", "b.txt", "file changed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("CommitStat missing %q:\n%s", want, got)
+		}
+	}
+	if c.CommitStat(ctx, nil) != "" {
+		t.Error("no revs should yield an empty stat")
+	}
+	for _, bad := range [][]string{{"--output=/tmp/x"}, {"", "HEAD"}, {"no-such-commit"}} {
+		if got := c.CommitStat(ctx, bad); got != "" {
+			t.Errorf("CommitStat(%q) = %q, want empty", bad, got)
+		}
+	}
+	if New(t.TempDir()).CommitStat(ctx, []string{"HEAD"}) != "" {
+		t.Error("non-repo should yield an empty stat")
+	}
+}
+
+// The diffstat embedded in work evidence is capped: a long-lived repo would
+// otherwise write a line per file changed since the ticket was created.
+func TestDiffStatIsCapped(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	run(t, dir, "checkout", "-b", "main")
+	writeFile(t, dir, "seed.txt", "s\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "seed")
+	base := revParse(t, dir, "HEAD")
+	for i := 0; i < 80; i++ {
+		writeFile(t, dir, filepath.Join("gen", "f"+strings.Repeat("x", i%7)+string(rune('a'+i%26))+string(rune('a'+i/26))+".txt"), "x\n")
+	}
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "many files")
+
+	stat := New(dir).DiffStat(context.Background(), base)
+	lines := strings.Split(strings.TrimSpace(stat), "\n")
+	if len(lines) > diffStatMaxFiles+2 {
+		t.Fatalf("DiffStat not capped: %d lines\n%s", len(lines), stat)
+	}
+	if !strings.Contains(lines[len(lines)-1], "80 files changed") {
+		t.Errorf("summary line must still report the real total, got %q", lines[len(lines)-1])
+	}
+}
+
+func TestNullClientRangeAndChanged(t *testing.T) {
+	n := nullClient{}
+	ctx := context.Background()
+	if _, _, ok := n.ResolveCommit(ctx, "HEAD"); ok {
+		t.Fatal("ResolveCommit")
+	}
+	if n.ChangedFiles(ctx, "HEAD", ".pine") != nil || n.RangeLog(ctx, "a", "b", "") != nil || n.CommitStat(ctx, []string{"x"}) != "" {
+		t.Fatal("null range/changed/stat")
 	}
 }

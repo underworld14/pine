@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -265,5 +266,168 @@ func TestShortSHA(t *testing.T) {
 	}
 	if got := shortSHA(""); got != "" {
 		t.Errorf("shortSHA(\"\") = %q, want \"\"", got)
+	}
+}
+
+func ticketBody(t *testing.T, dir, id string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, ".pine", "tickets", id+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func ticketStatus(t *testing.T, dir, id string) string {
+	t.Helper()
+	out, err := run(t, dir, "show", id, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct{ Status string }
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err)
+	}
+	return v.Status
+}
+
+func codeCommit(t *testing.T, dir, file, msg string) {
+	t.Helper()
+	writeRepoFile(t, dir, file, "package x\n")
+	gitRun(t, dir, "add", file)
+	gitRun(t, dir, "commit", "-q", "-m", msg)
+}
+
+func TestCreateCommitEvidence(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	codeCommit(t, dir, "code.go", "feat: implement thing")
+
+	out, err := run(t, dir, "create", "--type", "bug", "--title", "recorded",
+		"--status", "testing", "--commit", "HEAD")
+	if err != nil {
+		t.Fatalf("create --commit: %v\n%s", err, out)
+	}
+	body := ticketBody(t, dir, "BUG-001")
+	for _, want := range []string{
+		"## Work Evidence",
+		"Recorded from commits by `pine create --commit`",
+		"- Commits (1):",
+		"feat: implement thing",
+		"code.go",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("ticket body missing %q:\n%s", want, body)
+		}
+	}
+	// The template sections are still there ahead of the evidence.
+	if !strings.Contains(body, "# Acceptance Criteria") {
+		t.Errorf("template body lost:\n%s", body)
+	}
+	if got := ticketStatus(t, dir, "BUG-001"); got != "testing" {
+		t.Errorf("status = %q, want testing (never done on create)", got)
+	}
+}
+
+func TestCreateCommitBadRevCreatesNothing(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	codeCommit(t, dir, "code.go", "feat: implement thing")
+
+	_, err := run(t, dir, "create", "--type", "bug", "--title", "x", "--commit", "HEAD", "--commit", "no-such-commit")
+	if err == nil || !strings.Contains(err.Error(), `unknown commit "no-such-commit"`) {
+		t.Fatalf("want unknown commit error, got %v", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, ".pine", "tickets"))
+	if len(entries) != 0 {
+		t.Fatalf("a bad rev must create nothing, found %d ticket files", len(entries))
+	}
+}
+
+func TestCloseKeepsRecordedEvidence(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	codeCommit(t, dir, "code.go", "feat: implement thing")
+	if _, err := run(t, dir, "create", "--type", "bug", "--title", "recorded",
+		"--commit", "HEAD", "--verify", "echo verified-ok"); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated work lands afterwards; a creation-anchored diff would swallow it.
+	codeCommit(t, dir, "other.go", "feat: something unrelated")
+
+	out, err := run(t, dir, "close", "--evidence", "BUG-001")
+	if err != nil {
+		t.Fatalf("close --evidence: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "kept recorded commit evidence") {
+		t.Errorf("output should say the recorded evidence was kept: %s", out)
+	}
+	body := ticketBody(t, dir, "BUG-001")
+	if !strings.Contains(body, "code.go") || strings.Contains(body, "other.go") || strings.Contains(body, "Closed by `pine close --evidence`") {
+		t.Errorf("recorded evidence must be kept untouched:\n%s", body)
+	}
+	if !strings.Contains(body, "## Verification") || !strings.Contains(body, "verified-ok") {
+		t.Errorf("verify: must still run and be recorded:\n%s", body)
+	}
+	if got := ticketStatus(t, dir, "BUG-001"); got != "done" {
+		t.Errorf("status = %q, want done", got)
+	}
+}
+
+func TestCloseEvidenceCommitRerecords(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	if _, err := run(t, dir, "create", "--type", "feature", "--title", "plain"); err != nil {
+		t.Fatal(err)
+	}
+	codeCommit(t, dir, "code.go", "feat: first")
+	codeCommit(t, dir, "more.go", "feat: second")
+
+	out, err := run(t, dir, "close", "--evidence", "--commit", "HEAD~1", "FEAT-001")
+	if err != nil {
+		t.Fatalf("close --evidence --commit: %v\n%s", err, out)
+	}
+	body := ticketBody(t, dir, "FEAT-001")
+	if !strings.Contains(body, "Recorded from commits by `pine close --evidence --commit`") ||
+		!strings.Contains(body, "feat: first") || strings.Contains(body, "feat: second") {
+		t.Errorf("should record exactly HEAD~1:\n%s", body)
+	}
+	// Re-running with another commit replaces the section rather than stacking.
+	if _, err := run(t, dir, "close", "--evidence", "--commit", "HEAD", "FEAT-001"); err != nil {
+		t.Fatal(err)
+	}
+	body = ticketBody(t, dir, "FEAT-001")
+	if strings.Count(body, "## Work Evidence") != 1 || !strings.Contains(body, "feat: second") || strings.Contains(body, "feat: first") {
+		t.Errorf("re-record should replace the section:\n%s", body)
+	}
+}
+
+func TestCloseCommitFlagErrors(t *testing.T) {
+	dir := initGitRepoForEvidence(t)
+	if _, err := run(t, dir, "create", "--type", "feature", "--title", "plain"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, dir, "close", "--commit", "HEAD", "FEAT-001"); err == nil || !strings.Contains(err.Error(), "--evidence") {
+		t.Fatalf("--commit without --evidence should be refused, got %v", err)
+	}
+	if _, err := run(t, dir, "close", "--evidence", "--commit", "nope", "FEAT-001"); err == nil || !strings.Contains(err.Error(), "unknown commit") {
+		t.Fatalf("bad rev should be refused, got %v", err)
+	}
+	if got := ticketStatus(t, dir, "FEAT-001"); got == "done" {
+		t.Fatal("a refused close must leave the ticket open")
+	}
+}
+
+func TestHasRecordedEvidence(t *testing.T) {
+	rec := "## Work Evidence\n\n" + recordedEvidenceMarker + " `pine create --commit` on 2026-01-01.\n"
+	for name, tc := range map[string]struct {
+		body string
+		want bool
+	}{
+		"recorded":         {"# Notes\n\n" + rec, true},
+		"recorded+sibling": {rec + "\n## Verification\n\nok\n", true},
+		"auto evidence":    {"## Work Evidence\n\nClosed by `pine close --evidence` on 2026-01-01.\n", false},
+		"marker elsewhere": {"## Work Evidence\n\nauto\n\n## Notes\n\n" + recordedEvidenceMarker + " me\n", false},
+		"no section":       {"# Notes\n", false},
+	} {
+		if got := hasRecordedEvidence(tc.body); got != tc.want {
+			t.Errorf("%s: hasRecordedEvidence = %v, want %v", name, got, tc.want)
+		}
 	}
 }

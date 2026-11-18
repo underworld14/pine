@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -136,7 +137,7 @@ func newShowCmd() *cobra.Command {
 func newCreateCmd() *cobra.Command {
 	var (
 		typ, title, priority, parent, phase, verify, status, bodyFile string
-		labels, deps, skills                                          []string
+		labels, deps, skills, commits                                 []string
 		asJSON                                                        bool
 	)
 	cmd := &cobra.Command{
@@ -163,7 +164,16 @@ Pine reads two of them:
 skills, links, created, updated, blocked/unmet/dangling, hash, body).
 
 Dependencies set at creation can be rewired later with pine dep add/rm or
-pine update --add-dep/--rm-dep.`,
+pine update --add-dep/--rm-dep.
+
+--commit <rev> (repeatable) records those commits as the ticket's work
+evidence: a "## Work Evidence" section listing them with a file stat. Use it to
+file a ticket for work that is already committed, e.g.
+
+  pine create --type bug --title "Fix login" --status testing --commit HEAD
+
+pine close --evidence keeps a section recorded this way. A bad rev creates
+nothing.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -173,6 +183,12 @@ pine update --add-dep/--rm-dep.`,
 			body, err := readBody(bodyFile, cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			var recorded *recordedCommits
+			if len(commits) > 0 {
+				if recorded, err = resolveCommits(s, commits); err != nil {
+					return err
+				}
 			}
 			t, err := s.Create(store.CreateReq{
 				Type:     typ,
@@ -189,6 +205,15 @@ pine update --add-dep/--rm-dep.`,
 			})
 			if err != nil {
 				return err
+			}
+			if recorded != nil {
+				ev := recorded.evidence("pine create --commit")
+				if t, err = s.Update(t.ID, func(u *ticket.Ticket) error {
+					u.Body = appendEvidence(u.Body, ev)
+					return nil
+				}); err != nil {
+					return fmt.Errorf("created %s but could not record commit evidence: %w", t.ID, err)
+				}
 			}
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), view.Build(s, s.Graph(), t, true))
@@ -209,6 +234,7 @@ pine update --add-dep/--rm-dep.`,
 	f.StringSliceVar(&skills, "skill", nil, "agent skills the executing agent must load (repeatable or comma-separated)")
 	f.StringVar(&status, "status", "", "initial status (defaults to first board column)")
 	f.StringVar(&bodyFile, "body-file", "", "read the body from a file, or '-' for stdin")
+	f.StringSliceVar(&commits, "commit", nil, "record these commits (sha, tag, HEAD~1, …) as the ticket's work evidence (repeatable or comma-separated)")
 	f.BoolVar(&asJSON, "json", false, "output JSON")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("title")
@@ -335,6 +361,7 @@ pine prompt and pine context.`,
 
 func newCloseCmd() *cobra.Command {
 	var evidence, force bool
+	var commits []string
 	cmd := &cobra.Command{
 		Use:   "close <ID>...",
 		Short: "Mark one or more tickets done",
@@ -348,12 +375,26 @@ changed, suitable for review and audits.
 When a ticket defines a ` + "`verify:`" + ` frontmatter command, --evidence also runs it
 in the repo root and appends a "## Verification" section with the exit status
 and output. A failing verify command refuses the close (the ticket stays open);
-pass --force to close anyway and record the failure.`,
+pass --force to close anyway and record the failure.
+
+A Work Evidence section recorded from explicit commits (pine create --commit)
+is kept as is, since it is more exact than a diff from the ticket's creation
+time. Pass --commit <rev> (repeatable) with --evidence to record, or re-record,
+the evidence from specific commits instead.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(commits) > 0 && !evidence {
+				return errors.New("--commit records work evidence, so it needs --evidence")
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
+			}
+			var recorded *recordedCommits
+			if len(commits) > 0 {
+				if recorded, err = resolveCommits(s, commits); err != nil {
+					return err
+				}
 			}
 			for _, arg := range args {
 				id := normalizeID(arg)
@@ -361,6 +402,7 @@ pass --force to close anyway and record the failure.`,
 				// so neither the verify command nor git runs under the store
 				// write lock.
 				ev := ""
+				keptRecorded := false
 				ver := verifyResult{}
 				if evidence {
 					ver = verifyEvidence(s, id)
@@ -372,13 +414,22 @@ pass --force to close anyway and record the failure.`,
 						return fmt.Errorf("%s: verification FAILED (exit %d) — ticket left open; fix it or pass --force\n%s",
 							id, ver.exitCode, tail)
 					}
-					ev = workEvidence(s, id)
+					switch cur, gerr := s.Get(id); {
+					case recorded != nil:
+						ev = recorded.evidence("pine close --evidence --commit")
+					case gerr == nil && hasRecordedEvidence(cur.Body):
+						keptRecorded = true
+					default:
+						ev = workEvidence(s, id)
+					}
 				}
 				verSection := ver.section()
 				if _, err := s.Update(id, func(u *ticket.Ticket) error {
 					u.Status = ticket.StatusDone
 					if evidence {
-						u.Body = appendEvidence(u.Body, ev)
+						if ev != "" {
+							u.Body = appendEvidence(u.Body, ev)
+						}
 						if verSection != "" {
 							u.Body = appendSection(u.Body, "Verification", verSection)
 						}
@@ -390,6 +441,8 @@ pass --force to close anyway and record the failure.`,
 				switch {
 				case evidence && ver.failed():
 					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (verification FAILED, recorded — --force was passed)\n", id)
+				case evidence && keptRecorded:
+					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (kept recorded commit evidence)\n", id)
 				case evidence:
 					fmt.Fprintf(cmd.OutOrStdout(), "Closed %s (with work evidence)\n", id)
 				default:
@@ -402,6 +455,7 @@ pass --force to close anyway and record the failure.`,
 	f := cmd.Flags()
 	f.BoolVar(&evidence, "evidence", false, "attach a Work Evidence section (commits + file changes) and run the ticket's verify: command before marking it done")
 	f.BoolVar(&force, "force", false, "close even when the verify: command fails (the failure is recorded)")
+	f.StringSliceVar(&commits, "commit", nil, "with --evidence: record the evidence from these commits (sha, tag, HEAD~1, …) instead of deriving it (repeatable or comma-separated)")
 	return cmd
 }
 
